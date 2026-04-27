@@ -51,6 +51,20 @@ export default function Home() {
   const [autoReplyTemplateLoading, setAutoReplyTemplateLoading] = useState(false);
   const [autoReplyTemplateSaving, setAutoReplyTemplateSaving] = useState(false);
   const [showTemplateManager, setShowTemplateManager] = useState(false);
+  const [showSlaManager, setShowSlaManager] = useState(true);
+  const [slaPolicies, setSlaPolicies] = useState<any[]>([]);
+  const [slaPoliciesLoading, setSlaPoliciesLoading] = useState(false);
+  const [slaPoliciesSaving, setSlaPoliciesSaving] = useState(false);
+  const [selectedSlaPolicyId, setSelectedSlaPolicyId] = useState<number | null>(null);
+  const [slaEditorName, setSlaEditorName] = useState("");
+  const [slaEditorPriority, setSlaEditorPriority] = useState("100");
+  const [slaEditorWeekdays, setSlaEditorWeekdays] = useState("1,2,3,4,5");
+  const [slaEditorStartTime, setSlaEditorStartTime] = useState("09:00:00");
+  const [slaEditorEndTime, setSlaEditorEndTime] = useState("18:00:00");
+  const [slaEditorHours, setSlaEditorHours] = useState("8");
+  const [slaEditorCategory, setSlaEditorCategory] = useState("");
+  const [slaEditorTicketPriority, setSlaEditorTicketPriority] = useState("");
+  const [slaEditorEnabled, setSlaEditorEnabled] = useState(true);
   const [showOnlyCriticalUrgent, setShowOnlyCriticalUrgent] = useState(false);
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({
     in_progress: false,
@@ -97,6 +111,7 @@ export default function Home() {
     if (role === "team_leader") {
       loadOperatorPerformance();
       loadAutoReplyTemplates();
+      loadSlaPolicies();
     } else {
       setOperatorPerformance([]);
     }
@@ -320,6 +335,13 @@ export default function Home() {
   async function createTicket() {
     if (!user) return;
 
+    const nowIso = new Date().toISOString();
+    const slaSnapshot = await getSlaSnapshotForNewTicket(
+      nowIso,
+      category,
+      priority
+    );
+
     const { data, error } = await supabase
       .from("tickets")
       .insert([
@@ -330,9 +352,13 @@ export default function Home() {
           priority,
           created_by: user.id,
           requester_id: user.id,
+          sla_policy_id: slaSnapshot?.sla_policy_id ?? null,
+          sla_hours: slaSnapshot?.sla_hours ?? null,
+          sla_due_at: slaSnapshot?.sla_due_at ?? null,
+          sla_status: slaSnapshot?.sla_status ?? "on_track",
         },
       ])
-      .select("id, created_at, requester_id")
+      .select("id, created_at, requester_id, sla_due_at")
       .single();
 
     if (error) {
@@ -361,9 +387,14 @@ export default function Home() {
   }
 
   async function closeTicket(id: string) {
+    const ticketToClose = tickets.find((ticket) => ticket.id === id);
+    const dueAtMs = new Date(ticketToClose?.sla_due_at ?? "").getTime();
+    const closeStatus =
+      !Number.isNaN(dueAtMs) && Date.now() > dueAtMs ? "breached" : "met";
+
     const { error } = await supabase
       .from("tickets")
-      .update({ status: "closed" })
+      .update({ status: "closed", sla_status: closeStatus })
       .eq("id", id);
 
     if (error) alert(error.message);
@@ -376,7 +407,7 @@ export default function Home() {
   async function reopenTicket(id: string) {
     const { error } = await supabase
       .from("tickets")
-      .update({ status: "open" })
+      .update({ status: "open", sla_status: "on_track" })
       .eq("id", id);
   
     if (error) {
@@ -494,12 +525,19 @@ export default function Home() {
       timeZone: "Europe/Rome",
       weekday: "short",
       hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
       hour12: false,
     });
     const parts = formatter.formatToParts(date);
     const weekday = parts.find((part) => part.type === "weekday")?.value?.toLowerCase() ?? "";
     const hour = Number(parts.find((part) => part.type === "hour")?.value ?? "0");
-    return { weekday, hour };
+    const minute = Number(parts.find((part) => part.type === "minute")?.value ?? "0");
+    const second = Number(parts.find((part) => part.type === "second")?.value ?? "0");
+    const hh = String(hour).padStart(2, "0");
+    const mm = String(minute).padStart(2, "0");
+    const ss = String(second).padStart(2, "0");
+    return { weekday, hour, timeString: `${hh}:${mm}:${ss}` };
   }
 
   function shouldSendAutoReplyForDate(date: Date) {
@@ -515,6 +553,82 @@ export default function Home() {
       (hour < 9 || hour >= 18);
 
     return isWeekendWindow || isWeekdayNightWindow;
+  }
+
+  function parseTimeToSeconds(timeValue: string) {
+    const chunks = (timeValue || "00:00:00").split(":").map((chunk) => Number(chunk));
+    const hh = chunks[0] ?? 0;
+    const mm = chunks[1] ?? 0;
+    const ss = chunks[2] ?? 0;
+    return hh * 3600 + mm * 60 + ss;
+  }
+
+  function matchesSlaWindow(currentTime: string, startTime: string, endTime: string) {
+    const nowSec = parseTimeToSeconds(currentTime);
+    const startSec = parseTimeToSeconds(startTime);
+    const endSec = parseTimeToSeconds(endTime);
+
+    if (startSec <= endSec) {
+      return nowSec >= startSec && nowSec <= endSec;
+    }
+    return nowSec >= startSec || nowSec <= endSec;
+  }
+
+  async function getSlaSnapshotForNewTicket(
+    createdAtIso: string,
+    ticketCategory: string,
+    ticketPriority: string
+  ) {
+    const createdDate = new Date(createdAtIso);
+    if (Number.isNaN(createdDate.getTime())) return null;
+
+    const weekdayMap: Record<string, number> = {
+      mon: 1,
+      tue: 2,
+      wed: 3,
+      thu: 4,
+      fri: 5,
+      sat: 6,
+      sun: 7,
+    };
+    const { weekday, timeString } = getEuropeRomeParts(createdDate);
+    const currentWeekday = weekdayMap[weekday] ?? null;
+    if (!currentWeekday) return null;
+
+    const { data: policies, error } = await supabase
+      .from("sla_policies")
+      .select("id, priority, weekdays, start_time, end_time, sla_hours, category, ticket_priority")
+      .eq("is_active", true)
+      .order("priority", { ascending: true });
+
+    if (error || !policies || policies.length === 0) return null;
+
+    const matchingPolicy = policies.find((policy: any) => {
+      const weekdays: number[] = policy.weekdays ?? [];
+      if (!weekdays.includes(currentWeekday)) return false;
+      if (!matchesSlaWindow(timeString, policy.start_time, policy.end_time)) return false;
+
+      const policyCategory = String(policy.category ?? "").trim();
+      if (policyCategory && policyCategory !== ticketCategory) return false;
+
+      const policyTicketPriority = String(policy.ticket_priority ?? "").trim();
+      if (policyTicketPriority && policyTicketPriority !== ticketPriority) return false;
+
+      return true;
+    });
+
+    if (!matchingPolicy) return null;
+
+    const slaHoursValue = Number(matchingPolicy.sla_hours);
+    if (Number.isNaN(slaHoursValue) || slaHoursValue <= 0) return null;
+
+    const dueDate = new Date(createdDate.getTime() + slaHoursValue * 3600000);
+    return {
+      sla_policy_id: matchingPolicy.id,
+      sla_hours: slaHoursValue,
+      sla_due_at: dueDate.toISOString(),
+      sla_status: "on_track",
+    };
   }
 
   async function loadAutoReplyTemplates() {
@@ -543,6 +657,139 @@ export default function Home() {
     }
 
     setAutoReplyTemplateLoading(false);
+  }
+
+  function normalizeTimeValue(timeValue: string) {
+    const value = (timeValue || "").trim();
+    if (!value) return "00:00:00";
+    if (/^\d{2}:\d{2}$/.test(value)) return `${value}:00`;
+    return value;
+  }
+
+  function parseWeekdaysInput(value: string) {
+    return Array.from(
+      new Set(
+        value
+          .split(",")
+          .map((part) => Number(part.trim()))
+          .filter((day) => Number.isInteger(day) && day >= 1 && day <= 7)
+      )
+    ).sort((a, b) => a - b);
+  }
+
+  async function loadSlaPolicies() {
+    setSlaPoliciesLoading(true);
+    const { data, error } = await supabase
+      .from("sla_policies")
+      .select("*")
+      .order("priority", { ascending: true });
+
+    if (!error) {
+      const policies = data ?? [];
+      setSlaPolicies(policies);
+      if (policies.length > 0) {
+        selectSlaPolicyForEditing(policies[0].id, policies);
+      } else {
+        setSelectedSlaPolicyId(1);
+        setSlaEditorName("");
+        setSlaEditorPriority("100");
+        setSlaEditorWeekdays("1,2,3,4,5");
+        setSlaEditorStartTime("09:00:00");
+        setSlaEditorEndTime("18:00:00");
+        setSlaEditorHours("8");
+        setSlaEditorCategory("");
+        setSlaEditorTicketPriority("");
+        setSlaEditorEnabled(true);
+      }
+    }
+    setSlaPoliciesLoading(false);
+  }
+
+  function selectSlaPolicyForEditing(policyId: number, source?: any[]) {
+    const list = source ?? slaPolicies;
+    const policy = list.find((item) => item.id === policyId);
+    if (!policy) return;
+
+    setSelectedSlaPolicyId(policy.id);
+    setSlaEditorName(policy.name ?? "");
+    setSlaEditorPriority(String(policy.priority ?? 100));
+    setSlaEditorWeekdays((policy.weekdays ?? []).join(","));
+    setSlaEditorStartTime(normalizeTimeValue(policy.start_time));
+    setSlaEditorEndTime(normalizeTimeValue(policy.end_time));
+    setSlaEditorHours(String(policy.sla_hours ?? 8));
+    setSlaEditorCategory(policy.category ?? "");
+    setSlaEditorTicketPriority(policy.ticket_priority ?? "");
+    setSlaEditorEnabled(Boolean(policy.is_active));
+  }
+
+  function createNewSlaPolicyDraft() {
+    const maxId = slaPolicies.reduce(
+      (acc, policy) => (policy.id > acc ? policy.id : acc),
+      0
+    );
+    setSelectedSlaPolicyId(maxId + 1);
+    setSlaEditorName("");
+    setSlaEditorPriority("100");
+    setSlaEditorWeekdays("1,2,3,4,5");
+    setSlaEditorStartTime("09:00:00");
+    setSlaEditorEndTime("18:00:00");
+    setSlaEditorHours("8");
+    setSlaEditorCategory("");
+    setSlaEditorTicketPriority("");
+    setSlaEditorEnabled(true);
+  }
+
+  async function saveSlaPolicy() {
+    if (role !== "team_leader") return;
+    let policyId = selectedSlaPolicyId;
+    if (!policyId) {
+      const maxId = slaPolicies.reduce(
+        (acc, policy) => (policy.id > acc ? policy.id : acc),
+        0
+      );
+      policyId = maxId + 1;
+      setSelectedSlaPolicyId(policyId);
+    }
+
+    const weekdays = parseWeekdaysInput(slaEditorWeekdays);
+    if (weekdays.length === 0) {
+      alert("Inserisci almeno un giorno valido (1-7)");
+      return;
+    }
+
+    const priorityValue = Number(slaEditorPriority);
+    const hoursValue = Number(slaEditorHours);
+    if (!Number.isInteger(priorityValue) || !Number.isInteger(hoursValue) || hoursValue <= 0) {
+      alert("Controlla priorita e ore SLA");
+      return;
+    }
+
+    setSlaPoliciesSaving(true);
+    const { error } = await supabase.from("sla_policies").upsert(
+      {
+        id: policyId,
+        name: slaEditorName.trim() || `Policy #${policyId}`,
+        priority: priorityValue,
+        weekdays,
+        start_time: normalizeTimeValue(slaEditorStartTime),
+        end_time: normalizeTimeValue(slaEditorEndTime),
+        sla_hours: hoursValue,
+        category: slaEditorCategory.trim() || null,
+        ticket_priority: slaEditorTicketPriority.trim() || null,
+        is_active: slaEditorEnabled,
+        updated_by: user?.id ?? null,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "id" }
+    );
+    setSlaPoliciesSaving(false);
+
+    if (error) {
+      alert(error.message);
+      return;
+    }
+    await loadSlaPolicies();
+    alert("Policy SLA salvata");
   }
 
   function selectTemplateForEditing(templateId: number) {
@@ -649,7 +896,7 @@ export default function Home() {
     const end = toDateOrNull(`${kpiEndDate}T23:59:59`);
     const slaThreshold = Number(slaHours);
 
-    if (!start || !end || start > end || Number.isNaN(slaThreshold)) {
+    if (!start || !end || start > end) {
       setOperatorPerformance([]);
       return;
     }
@@ -742,7 +989,9 @@ export default function Home() {
       const resolutionHours = hoursBetween(createdAt, closedAt);
       if (resolutionHours >= 0) {
         bucket.resolutionSamples.push(resolutionHours);
-        if (resolutionHours > slaThreshold) {
+        const ticketSlaHours =
+          Number(ticket.sla_hours) > 0 ? Number(ticket.sla_hours) : slaThreshold;
+        if (ticketSlaHours > 0 && resolutionHours > ticketSlaHours) {
           bucket.slaBreaches += 1;
         }
       }
@@ -826,9 +1075,13 @@ export default function Home() {
   const globalSlaHours = Number(slaHours);
   const atRiskTicketsCount = filteredTickets.filter((ticket) => {
     if (ticket.status === "closed") return false;
+    const dueAtMs = new Date(ticket.sla_due_at ?? "").getTime();
+    if (!Number.isNaN(dueAtMs)) return nowMs >= dueAtMs;
+
     const createdAtMs = new Date(ticket.created_at ?? "").getTime();
-    if (Number.isNaN(createdAtMs) || Number.isNaN(globalSlaHours)) return false;
-    return (nowMs - createdAtMs) / 3600000 >= globalSlaHours;
+    const fallbackSla = Number(ticket.sla_hours) > 0 ? Number(ticket.sla_hours) : globalSlaHours;
+    if (Number.isNaN(createdAtMs) || Number.isNaN(fallbackSla) || fallbackSla <= 0) return false;
+    return (nowMs - createdAtMs) / 3600000 >= fallbackSla;
   }).length;
 
   const avgResolutionTeam =
@@ -850,13 +1103,23 @@ export default function Home() {
     .map((ticket) => {
       const createdAtMs = new Date(ticket.created_at ?? "").getTime();
       const ageHours = Number.isNaN(createdAtMs) ? 0 : (nowMs - createdAtMs) / 3600000;
+      const dueAtMs = new Date(ticket.sla_due_at ?? "").getTime();
+      const ticketSlaHours =
+        Number(ticket.sla_hours) > 0 ? Number(ticket.sla_hours) : globalSlaHours;
       const slaProgress =
-        Number.isNaN(globalSlaHours) || globalSlaHours <= 0 ? 0 : ageHours / globalSlaHours;
+        !Number.isNaN(dueAtMs) && !Number.isNaN(createdAtMs) && dueAtMs > createdAtMs
+          ? (nowMs - createdAtMs) / (dueAtMs - createdAtMs)
+          : Number.isNaN(ticketSlaHours) || ticketSlaHours <= 0
+          ? 0
+          : ageHours / ticketSlaHours;
+      const etaHours =
+        !Number.isNaN(dueAtMs) ? (dueAtMs - nowMs) / 3600000 : ticketSlaHours - ageHours;
 
       return {
         ...ticket,
         ageHours,
         slaProgress,
+        etaHours,
       };
     })
     .sort((a, b) => {
@@ -974,6 +1237,14 @@ export default function Home() {
                 className="ml-3 rounded border border-black bg-white px-4 py-2 text-black"
               >
                 {showTemplateManager ? "Chiudi template" : "Gestione template"}
+              </button>
+            )}
+            {role === "team_leader" && (
+              <button
+                onClick={() => setShowSlaManager(!showSlaManager)}
+                className="ml-3 rounded border border-black bg-white px-4 py-2 text-black"
+              >
+                {showSlaManager ? "Nascondi SLA" : "Mostra SLA"}
               </button>
             )}
           </div>
@@ -1094,6 +1365,175 @@ export default function Home() {
               >
                 Chiudi scheda
               </button>
+            </div>
+          )}
+
+          {role === "team_leader" && showSlaManager && (
+            <div className="mb-6 rounded border bg-gray-50 p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-lg font-bold text-black">Gestione policy SLA</h2>
+                <button
+                  onClick={createNewSlaPolicyDraft}
+                  className="rounded border border-black bg-white px-3 py-1 text-sm text-black"
+                >
+                  + Nuova policy
+                </button>
+              </div>
+              <p className="mb-3 text-xs text-gray-600">
+                Giorni: 1=Lun, 2=Mar, 3=Mer, 4=Gio, 5=Ven, 6=Sab, 7=Dom.
+              </p>
+
+              {slaPoliciesLoading ? (
+                <p className="text-sm text-gray-600">Caricamento policy SLA...</p>
+              ) : (
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                  <div className="rounded border bg-white p-2">
+                    <p className="mb-2 text-xs font-bold text-gray-700">Policy disponibili</p>
+                    {slaPolicies.length === 0 && (
+                      <p className="text-xs text-gray-500">Nessuna policy salvata.</p>
+                    )}
+                    <div className="space-y-1">
+                      {slaPolicies.map((policy) => (
+                        <button
+                          key={policy.id}
+                          onClick={() => selectSlaPolicyForEditing(policy.id)}
+                          className={`w-full rounded border px-2 py-1 text-left text-xs ${
+                            selectedSlaPolicyId === policy.id
+                              ? "border-black bg-gray-100 text-black"
+                              : "border-gray-200 bg-white text-gray-700"
+                          }`}
+                        >
+                          {policy.name} (P{policy.priority}) {policy.is_active ? "(attiva)" : "(disattiva)"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <p className="mb-2 text-xs text-gray-700">Modifica policy SLA</p>
+                    <label className="mb-1 block text-xs font-semibold text-gray-700">
+                      Nome policy
+                    </label>
+                    <input
+                      className="mb-2 w-full rounded border p-2 text-black"
+                      placeholder="Nome policy"
+                      value={slaEditorName}
+                      onChange={(e) => setSlaEditorName(e.target.value)}
+                    />
+                    <div className="mb-2 grid grid-cols-1 gap-2 md:grid-cols-3">
+                      <div className="md:col-span-2">
+                        <label className="mb-1 block text-xs font-semibold text-gray-700">
+                          Priorita regola
+                        </label>
+                        <select
+                          className="h-10 w-full rounded border px-2 text-black"
+                          value={slaEditorPriority}
+                          onChange={(e) => setSlaEditorPriority(e.target.value)}
+                        >
+                          <option value="10">Urgente (precedenza massima)</option>
+                          <option value="30">Alta</option>
+                          <option value="60">Media</option>
+                          <option value="100">Bassa (fallback)</option>
+                        </select>
+                      </div>
+                      <div className="md:col-span-1">
+                        <label className="mb-1 block text-xs font-semibold text-gray-700">
+                          Ore SLA
+                        </label>
+                        <input
+                          className="h-10 w-full rounded border px-2 text-black"
+                          placeholder="Ore SLA (es. 24)"
+                          value={slaEditorHours}
+                          onChange={(e) => setSlaEditorHours(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                    <div className="mb-2 grid grid-cols-1 gap-2 md:grid-cols-2">
+                      <div>
+                        <label className="mb-1 block text-xs font-semibold text-gray-700">
+                          Categoria (filtro opzionale)
+                        </label>
+                        <select
+                          className="w-full rounded border p-2 text-black"
+                          value={slaEditorCategory}
+                          onChange={(e) => setSlaEditorCategory(e.target.value)}
+                        >
+                          <option value="">Qualsiasi</option>
+                          <option value="general">Generale</option>
+                          <option value="it">IT</option>
+                          <option value="hr">HR</option>
+                          <option value="admin">Amministrazione</option>
+                          <option value="bug">Bug</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-semibold text-gray-700">
+                          Priorita ticket (filtro opzionale)
+                        </label>
+                        <select
+                          className="w-full rounded border p-2 text-black"
+                          value={slaEditorTicketPriority}
+                          onChange={(e) => setSlaEditorTicketPriority(e.target.value)}
+                        >
+                          <option value="">Qualsiasi</option>
+                          <option value="low">Bassa</option>
+                          <option value="medium">Media</option>
+                          <option value="high">Alta</option>
+                          <option value="urgent">Urgente</option>
+                        </select>
+                      </div>
+                    </div>
+                    <label className="mb-1 block text-xs font-semibold text-gray-700">
+                      Giorni (1=Lun ... 7=Dom)
+                    </label>
+                    <input
+                      className="mb-2 w-full rounded border p-2 text-black"
+                      placeholder="Giorni (es. 1,2,3,4,5)"
+                      value={slaEditorWeekdays}
+                      onChange={(e) => setSlaEditorWeekdays(e.target.value)}
+                    />
+                    <div className="mb-2 grid grid-cols-1 gap-2 md:grid-cols-2">
+                      <div>
+                        <label className="mb-1 block text-xs font-semibold text-gray-700">
+                          Ora inizio
+                        </label>
+                        <input
+                          className="w-full rounded border p-2 text-black"
+                          placeholder="Ora inizio (HH:MM:SS)"
+                          value={slaEditorStartTime}
+                          onChange={(e) => setSlaEditorStartTime(e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-semibold text-gray-700">
+                          Ora fine
+                        </label>
+                        <input
+                          className="w-full rounded border p-2 text-black"
+                          placeholder="Ora fine (HH:MM:SS)"
+                          value={slaEditorEndTime}
+                          onChange={(e) => setSlaEditorEndTime(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                    <label className="mb-2 flex items-center gap-2 text-sm text-black">
+                      <input
+                        type="checkbox"
+                        checked={slaEditorEnabled}
+                        onChange={(e) => setSlaEditorEnabled(e.target.checked)}
+                      />
+                      Policy attiva
+                    </label>
+                    <button
+                      onClick={saveSlaPolicy}
+                      disabled={slaPoliciesSaving}
+                      className="rounded bg-black px-4 py-2 text-white disabled:opacity-60"
+                    >
+                      {slaPoliciesSaving ? "Salvataggio..." : "Salva policy SLA"}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -1240,7 +1680,7 @@ export default function Home() {
                               {getUrgentRiskLabel(ticket.slaProgress)}
                             </span>
                             <p className="text-xs text-gray-600">
-                              {ticket.status} - ETA SLA: {(globalSlaHours - ticket.ageHours).toFixed(1)}h
+                              {ticket.status} - ETA SLA: {ticket.etaHours.toFixed(1)}h
                             </p>
                           </div>
                         </div>
@@ -1278,7 +1718,7 @@ export default function Home() {
                 </label>
 
                 <label className="text-sm text-black">
-                  SLA globale (ore)
+                  SLA fallback (ore)
                   <input
                     type="number"
                     min="1"
