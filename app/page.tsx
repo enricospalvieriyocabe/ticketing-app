@@ -22,6 +22,18 @@ export default function Home() {
   const [filterPriority, setFilterPriority] = useState("all");
   const [showNotifications, setShowNotifications] = useState(false);
   const [handoffNote, setHandoffNote] = useState("");
+  const [kpiStartDate, setKpiStartDate] = useState(() => {
+    const now = new Date();
+    const start = new Date(now);
+    start.setDate(now.getDate() - 30);
+    return start.toISOString().slice(0, 10);
+  });
+  const [kpiEndDate, setKpiEndDate] = useState(() =>
+    new Date().toISOString().slice(0, 10)
+  );
+  const [slaHours, setSlaHours] = useState("24");
+  const [operatorPerformance, setOperatorPerformance] = useState<any[]>([]);
+  const [kpiLoading, setKpiLoading] = useState(false);
   const notificationRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -49,6 +61,14 @@ export default function Home() {
 
     return () => listener.subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (role === "team_leader") {
+      loadOperatorPerformance();
+    } else {
+      setOperatorPerformance([]);
+    }
+  }, [role, tickets, assignableUsers, kpiStartDate, kpiEndDate, slaHours]);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -163,6 +183,19 @@ export default function Home() {
     }
   }
 
+  async function addTicketEvent(ticketId: string, type: string, description: string) {
+    if (!user) return;
+
+    await supabase.from("ticket_events").insert([
+      {
+        ticket_id: ticketId,
+        user_id: user.id,
+        type,
+        description,
+      },
+    ]);
+  }
+
   async function closeTicket(id: string) {
     const { error } = await supabase
       .from("tickets")
@@ -170,7 +203,10 @@ export default function Home() {
       .eq("id", id);
 
     if (error) alert(error.message);
-    else if (user) loadTickets(user);
+    else if (user) {
+      await addTicketEvent(id, "closed", "Ticket chiuso");
+      loadTickets(user);
+    }
   }
 
   async function reopenTicket(id: string) {
@@ -182,6 +218,7 @@ export default function Home() {
     if (error) {
       alert(error.message);
     } else if (user) {
+      await addTicketEvent(id, "reopened", "Ticket riaperto");
       loadTickets(user);
     }
   }
@@ -210,6 +247,7 @@ export default function Home() {
     if (error) {
       alert(error.message);
     } else {
+      await addTicketEvent(id, "in_progress", "Ticket preso in carico");
       loadTickets(user);
     }
   }
@@ -223,6 +261,7 @@ export default function Home() {
     if (error) {
       alert(error.message);
     } else if (user) {
+      await addTicketEvent(id, "waiting", "Ticket messo in attesa");
       loadTickets(user);
     }
   }
@@ -237,7 +276,161 @@ export default function Home() {
       .eq("id", ticketId);
 
     if (error) alert(error.message);
-    else if (user) loadTickets(user);
+    else if (user) {
+      const assignee = assignableUsers.find((person) => person.id === assigneeId);
+      const description = assignee
+        ? `Ticket assegnato a ${assignee.email}`
+        : "Assegnazione rimossa";
+
+      await addTicketEvent(ticketId, "assigned", description);
+      loadTickets(user);
+    }
+  }
+
+  function toDateOrNull(value: string) {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  function hoursBetween(start: Date, end: Date) {
+    return (end.getTime() - start.getTime()) / 3600000;
+  }
+
+  function formatHours(hours: number | null) {
+    if (hours === null || Number.isNaN(hours)) return "-";
+    return `${hours.toFixed(1)}h`;
+  }
+
+  async function loadOperatorPerformance() {
+    if (role !== "team_leader") return;
+
+    const start = toDateOrNull(`${kpiStartDate}T00:00:00`);
+    const end = toDateOrNull(`${kpiEndDate}T23:59:59`);
+    const slaThreshold = Number(slaHours);
+
+    if (!start || !end || start > end || Number.isNaN(slaThreshold)) {
+      setOperatorPerformance([]);
+      return;
+    }
+
+    setKpiLoading(true);
+
+    const ticketIds = tickets.map((ticket) => ticket.id);
+    let events: any[] = [];
+
+    if (ticketIds.length > 0) {
+      const { data: eventsData, error: eventsError } = await supabase
+        .from("ticket_events")
+        .select("ticket_id, type, created_at")
+        .in("ticket_id", ticketIds);
+
+      if (eventsError) {
+        alert(eventsError.message);
+      } else {
+        events = eventsData ?? [];
+      }
+    }
+
+    const eventsByTicketId = new Map<string, any[]>();
+    for (const event of events) {
+      const list = eventsByTicketId.get(event.ticket_id) ?? [];
+      list.push(event);
+      eventsByTicketId.set(event.ticket_id, list);
+    }
+
+    const operators = assignableUsers.filter((person) => person.role === "operator");
+    const perOperator = new Map(
+      operators.map((operator) => [
+        operator.id,
+        {
+          operatorId: operator.id,
+          operatorEmail: operator.email,
+          closedCount: 0,
+          inProgressCount: 0,
+          firstTakeSamples: [] as number[],
+          resolutionSamples: [] as number[],
+          slaBreaches: 0,
+        },
+      ])
+    );
+
+    for (const ticket of tickets) {
+      const assigneeId = ticket.assigned_to;
+      if (!assigneeId || !perOperator.has(assigneeId)) continue;
+
+      const bucket = perOperator.get(assigneeId);
+      if (!bucket) continue;
+
+      if (ticket.status === "in_progress") {
+        bucket.inProgressCount += 1;
+      }
+
+      const createdAt = toDateOrNull(ticket.created_at);
+      if (!createdAt) continue;
+
+      const ticketEvents = (eventsByTicketId.get(ticket.id) ?? [])
+        .map((event) => ({ ...event, parsedAt: toDateOrNull(event.created_at) }))
+        .filter((event) => event.parsedAt !== null);
+
+      const inProgressEvents = ticketEvents
+        .filter((event) => event.type === "in_progress")
+        .sort((a, b) => a.parsedAt.getTime() - b.parsedAt.getTime());
+      const firstInProgress = inProgressEvents[0]?.parsedAt ?? null;
+
+      if (
+        firstInProgress &&
+        firstInProgress >= start &&
+        firstInProgress <= end
+      ) {
+        const firstTakeHours = hoursBetween(createdAt, firstInProgress);
+        if (firstTakeHours >= 0) {
+          bucket.firstTakeSamples.push(firstTakeHours);
+        }
+      }
+
+      const closedEvents = ticketEvents
+        .filter((event) => event.type === "closed")
+        .sort((a, b) => b.parsedAt.getTime() - a.parsedAt.getTime());
+
+      const closedAt = closedEvents[0]?.parsedAt ?? toDateOrNull(ticket.closed_at);
+      if (!closedAt) continue;
+      if (closedAt < start || closedAt > end) continue;
+
+      bucket.closedCount += 1;
+
+      const resolutionHours = hoursBetween(createdAt, closedAt);
+      if (resolutionHours >= 0) {
+        bucket.resolutionSamples.push(resolutionHours);
+        if (resolutionHours > slaThreshold) {
+          bucket.slaBreaches += 1;
+        }
+      }
+    }
+
+    const performanceRows = Array.from(perOperator.values()).map((item) => {
+      const avgResolution =
+        item.resolutionSamples.length > 0
+          ? item.resolutionSamples.reduce((acc, value) => acc + value, 0) /
+            item.resolutionSamples.length
+          : null;
+
+      const avgFirstTake =
+        item.firstTakeSamples.length > 0
+          ? item.firstTakeSamples.reduce((acc, value) => acc + value, 0) /
+            item.firstTakeSamples.length
+          : null;
+
+      return {
+        ...item,
+        avgResolution,
+        avgFirstTake,
+      };
+    });
+
+    setOperatorPerformance(
+      performanceRows.sort((a, b) => b.closedCount - a.closedCount)
+    );
+    setKpiLoading(false);
   }
 
   const myAssignedTickets = tickets.filter(
@@ -493,6 +686,86 @@ export default function Home() {
               <option value="urgent">Urgente</option>
             </select>
           </div>
+
+          {role === "team_leader" && (
+            <div className="mb-6 rounded border bg-gray-50 p-4">
+              <h2 className="mb-3 text-lg font-bold text-black">
+                Dashboard performance operatori
+              </h2>
+
+              <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-4">
+                <label className="text-sm text-black">
+                  Data inizio
+                  <input
+                    type="date"
+                    className="mt-1 w-full rounded border p-2 text-black"
+                    value={kpiStartDate}
+                    onChange={(e) => setKpiStartDate(e.target.value)}
+                  />
+                </label>
+
+                <label className="text-sm text-black">
+                  Data fine
+                  <input
+                    type="date"
+                    className="mt-1 w-full rounded border p-2 text-black"
+                    value={kpiEndDate}
+                    onChange={(e) => setKpiEndDate(e.target.value)}
+                  />
+                </label>
+
+                <label className="text-sm text-black">
+                  SLA globale (ore)
+                  <input
+                    type="number"
+                    min="1"
+                    className="mt-1 w-full rounded border p-2 text-black"
+                    value={slaHours}
+                    onChange={(e) => setSlaHours(e.target.value)}
+                  />
+                </label>
+              </div>
+
+              {kpiLoading && (
+                <p className="mb-2 text-sm text-gray-600">Calcolo KPI in corso...</p>
+              )}
+
+              {!kpiLoading && operatorPerformance.length === 0 && (
+                <p className="mb-2 text-sm text-gray-600">
+                  Nessun dato disponibile per il periodo selezionato.
+                </p>
+              )}
+
+              {!kpiLoading && operatorPerformance.length > 0 && (
+                <div className="overflow-x-auto">
+                  <table className="w-full border text-sm text-black">
+                    <thead className="bg-white">
+                      <tr>
+                        <th className="border px-2 py-2 text-left">Operatore</th>
+                        <th className="border px-2 py-2 text-left">Chiusi</th>
+                        <th className="border px-2 py-2 text-left">In lavorazione</th>
+                        <th className="border px-2 py-2 text-left">Tempo medio risoluzione</th>
+                        <th className="border px-2 py-2 text-left">Tempo medio presa in carico</th>
+                        <th className="border px-2 py-2 text-left">Fuori SLA</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {operatorPerformance.map((row) => (
+                        <tr key={row.operatorId} className="bg-white">
+                          <td className="border px-2 py-2">{row.operatorEmail}</td>
+                          <td className="border px-2 py-2">{row.closedCount}</td>
+                          <td className="border px-2 py-2">{row.inProgressCount}</td>
+                          <td className="border px-2 py-2">{formatHours(row.avgResolution)}</td>
+                          <td className="border px-2 py-2">{formatHours(row.avgFirstTake)}</td>
+                          <td className="border px-2 py-2">{row.slaBreaches}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
 
         <div className="mb-6 space-y-6">
             <div>
