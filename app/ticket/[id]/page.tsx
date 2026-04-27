@@ -545,7 +545,8 @@ export default function TicketPage() {
               <h2 className="mb-2 font-bold text-black">Azioni</h2>
   
               <div className="flex flex-wrap gap-2">
-                {ticket.status === "assigned" && (
+                {ticket.status === "assigned" &&
+                  (role === "operator" || role === "team_leader") && (
                   <button
                     onClick={startTicket}
                     className="rounded bg-blue-600 px-3 py-1 text-white"
