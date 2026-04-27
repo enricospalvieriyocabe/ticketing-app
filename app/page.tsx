@@ -5,6 +5,7 @@ import { supabase } from "../lib/supabase";
 
 export default function Home() {
   const [user, setUser] = useState<any>(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [role, setRole] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -47,7 +48,12 @@ export default function Home() {
         setUser(data.user);
         loadTickets(data.user);
         loadNotifications(data.user);
+      } else {
+        setUser(null);
+        setTickets([]);
+        setRole("");
       }
+      setAuthLoading(false);
     });
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -60,6 +66,7 @@ export default function Home() {
         setTickets([]);
         setRole("");
       }
+      setAuthLoading(false);
     });
 
     return () => listener.subscription.unsubscribe();
@@ -530,6 +537,14 @@ export default function Home() {
   const assigneeNameById = new Map(
     assignableUsers.map((person) => [person.id, getProfileDisplayName(person)])
   );
+
+  if (authLoading) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-gray-100">
+        <p className="text-sm text-gray-600">Caricamento sessione...</p>
+      </main>
+    );
+  }
 
   if (user) {
     return (
