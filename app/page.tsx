@@ -47,7 +47,7 @@ export default function Home() {
   const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null);
   const [templateEditorTitle, setTemplateEditorTitle] = useState("");
   const [templateEditorBody, setTemplateEditorBody] = useState("");
-  const [templateEditorEnabled, setTemplateEditorEnabled] = useState(true);
+  const [templateEditorEnabled, setTemplateEditorEnabled] = useState(false);
   const [autoReplyTemplateLoading, setAutoReplyTemplateLoading] = useState(false);
   const [autoReplyTemplateSaving, setAutoReplyTemplateSaving] = useState(false);
   const [showTemplateManager, setShowTemplateManager] = useState(false);
@@ -64,6 +64,7 @@ export default function Home() {
   const [slaEditorHours, setSlaEditorHours] = useState("8");
   const [slaEditorCategory, setSlaEditorCategory] = useState("");
   const [slaEditorTicketPriority, setSlaEditorTicketPriority] = useState("");
+  const [slaEditorTemplateId, setSlaEditorTemplateId] = useState("");
   const [slaEditorEnabled, setSlaEditorEnabled] = useState(true);
   const [showOnlyCriticalUrgent, setShowOnlyCriticalUrgent] = useState(false);
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({
@@ -365,7 +366,12 @@ export default function Home() {
       alert(error.message);
     } else {
       if (data?.id && data?.requester_id && data?.created_at) {
-        await sendAutoReplyIfNeeded(data.id, data.requester_id, data.created_at);
+        await sendAutoReplyIfNeeded(
+          data.id,
+          data.requester_id,
+          data.created_at,
+          slaSnapshot?.auto_reply_template_id ?? null
+        );
       }
       setTitle("");
       setDescription("");
@@ -597,7 +603,9 @@ export default function Home() {
 
     const { data: policies, error } = await supabase
       .from("sla_policies")
-      .select("id, priority, weekdays, start_time, end_time, sla_hours, category, ticket_priority")
+      .select(
+        "id, priority, weekdays, start_time, end_time, sla_hours, category, ticket_priority, auto_reply_template_id"
+      )
       .eq("is_active", true)
       .order("priority", { ascending: true });
 
@@ -628,6 +636,7 @@ export default function Home() {
       sla_hours: slaHoursValue,
       sla_due_at: dueDate.toISOString(),
       sla_status: "on_track",
+      auto_reply_template_id: matchingPolicy.auto_reply_template_id ?? null,
     };
   }
 
@@ -652,7 +661,7 @@ export default function Home() {
         setSelectedTemplateId(1);
         setTemplateEditorTitle("");
         setTemplateEditorBody("");
-        setTemplateEditorEnabled(true);
+        setTemplateEditorEnabled(false);
       }
     }
 
@@ -699,6 +708,7 @@ export default function Home() {
         setSlaEditorHours("8");
         setSlaEditorCategory("");
         setSlaEditorTicketPriority("");
+        setSlaEditorTemplateId("");
         setSlaEditorEnabled(true);
       }
     }
@@ -719,6 +729,9 @@ export default function Home() {
     setSlaEditorHours(String(policy.sla_hours ?? 8));
     setSlaEditorCategory(policy.category ?? "");
     setSlaEditorTicketPriority(policy.ticket_priority ?? "");
+    setSlaEditorTemplateId(
+      policy.auto_reply_template_id ? String(policy.auto_reply_template_id) : ""
+    );
     setSlaEditorEnabled(Boolean(policy.is_active));
   }
 
@@ -736,6 +749,7 @@ export default function Home() {
     setSlaEditorHours("8");
     setSlaEditorCategory("");
     setSlaEditorTicketPriority("");
+    setSlaEditorTemplateId("");
     setSlaEditorEnabled(true);
   }
 
@@ -776,6 +790,7 @@ export default function Home() {
         sla_hours: hoursValue,
         category: slaEditorCategory.trim() || null,
         ticket_priority: slaEditorTicketPriority.trim() || null,
+        auto_reply_template_id: slaEditorTemplateId ? Number(slaEditorTemplateId) : null,
         is_active: slaEditorEnabled,
         updated_by: user?.id ?? null,
         updated_at: new Date().toISOString(),
@@ -810,7 +825,7 @@ export default function Home() {
     setSelectedTemplateId(maxId + 1);
     setTemplateEditorTitle("");
     setTemplateEditorBody("");
-    setTemplateEditorEnabled(true);
+    setTemplateEditorEnabled(false);
   }
 
   async function saveAutoReplyTemplate() {
@@ -850,18 +865,43 @@ export default function Home() {
     alert("Template salvato");
   }
 
-  async function sendAutoReplyIfNeeded(ticketId: string, requesterId: string, createdAt: string) {
+  async function sendAutoReplyIfNeeded(
+    ticketId: string,
+    requesterId: string,
+    createdAt: string,
+    policyTemplateId?: number | null
+  ) {
     const createdDate = new Date(createdAt);
     if (Number.isNaN(createdDate.getTime())) return;
     if (!shouldSendAutoReplyForDate(createdDate)) return;
 
-    const { data: templateData, error: templateError } = await supabase
-      .from("ticket_auto_reply_templates")
-      .select("id, title, template_body, is_enabled, updated_at")
-      .eq("is_enabled", true)
-      .order("updated_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    let templateData: any = null;
+    let templateError: any = null;
+
+    if (policyTemplateId === null) return;
+
+    if (policyTemplateId) {
+      const selectedTemplate = await supabase
+        .from("ticket_auto_reply_templates")
+        .select("id, title, template_body, is_enabled, updated_at")
+        .eq("id", policyTemplateId)
+        .eq("is_enabled", true)
+        .maybeSingle();
+      templateData = selectedTemplate.data;
+      templateError = selectedTemplate.error;
+    }
+
+    if (!templateData && !templateError) {
+      const fallbackTemplate = await supabase
+        .from("ticket_auto_reply_templates")
+        .select("id, title, template_body, is_enabled, updated_at")
+        .eq("is_enabled", true)
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      templateData = fallbackTemplate.data;
+      templateError = fallbackTemplate.error;
+    }
 
     if (templateError || !templateData) return;
 
@@ -1482,6 +1522,24 @@ export default function Home() {
                           <option value="urgent">Urgente</option>
                         </select>
                       </div>
+                    </div>
+                    <div className="mb-2">
+                      <label className="mb-1 block text-xs font-semibold text-gray-700">
+                        Template automatico (opzionale)
+                      </label>
+                      <select
+                        className="w-full rounded border p-2 text-black"
+                        value={slaEditorTemplateId}
+                        onChange={(e) => setSlaEditorTemplateId(e.target.value)}
+                      >
+                        <option value="">Nessun template</option>
+                        {autoReplyTemplates.map((template) => (
+                          <option key={template.id} value={String(template.id)}>
+                            {(template.title || `Template #${template.id}`)}{" "}
+                            {template.is_enabled ? "(attivo)" : "(disattivo)"}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                     <label className="mb-1 block text-xs font-semibold text-gray-700">
                       Giorni (1=Lun ... 7=Dom)
