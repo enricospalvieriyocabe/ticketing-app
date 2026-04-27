@@ -20,6 +20,7 @@ export default function TicketPage() {
   const [newComment, setNewComment] = useState("");
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editingCommentBody, setEditingCommentBody] = useState("");
+  const [commentAuthorsById, setCommentAuthorsById] = useState<Record<string, string>>({});
 
   const [events, setEvents] = useState<any[]>([]);
   const [handoffNote, setHandoffNote] = useState("");
@@ -77,7 +78,36 @@ export default function TicketPage() {
       return;
     }
   
-    setComments(data ?? []);
+    const loadedComments = data ?? [];
+    setComments(loadedComments);
+
+    const authorIds = Array.from(
+      new Set(
+        loadedComments
+          .map((comment: any) => comment.user_id)
+          .filter((authorId: string | null | undefined) => Boolean(authorId))
+      )
+    );
+
+    if (authorIds.length === 0) {
+      setCommentAuthorsById({});
+      return;
+    }
+
+    const { data: authorProfiles } = await supabase
+      .from("profiles")
+      .select("*")
+      .in("id", authorIds);
+
+    const authorsMap: Record<string, string> = {};
+    for (const profile of authorProfiles ?? []) {
+      const fullName = String(profile.full_name ?? "").trim();
+      const composedName = `${profile.first_name ?? ""} ${profile.last_name ?? ""}`.trim();
+      const genericName = String(profile.name ?? "").trim();
+      authorsMap[profile.id] = fullName || composedName || genericName || profile.email || "Utente";
+    }
+
+    setCommentAuthorsById(authorsMap);
   }
 
   async function addComment() {
@@ -426,7 +456,9 @@ export default function TicketPage() {
                   >
                     <div className="mb-1 flex items-center justify-between">
                       <p className="text-xs font-bold text-gray-600">
-                        {isMine ? "Tu" : "Altro utente"}
+                        {isMine
+                          ? "Tu"
+                          : commentAuthorsById[c.user_id] || "Altro utente"}
                       </p>
 
                       <p className="text-xs text-gray-500">
