@@ -282,6 +282,10 @@ export default function Home() {
     (t) => !t.assigned_to && t.status !== "closed"
   );
 
+  const assigneeEmailById = new Map(
+    assignableUsers.map((person) => [person.id, person.email])
+  );
+
   if (user) {
     return (
       <main className="min-h-screen bg-gray-100 p-8">
@@ -501,7 +505,16 @@ export default function Home() {
                 )}
 
                 {assignedTickets.map((ticket) => (
-                  <TicketCard key={ticket.id} ticket={ticket} />
+                  <TicketCard
+                    key={ticket.id}
+                    ticket={ticket}
+                    showAssignee={role === "team_leader"}
+                    assigneeEmail={
+                      ticket.assigned_to
+                        ? assigneeEmailById.get(ticket.assigned_to)
+                        : null
+                    }
+                  />
                 ))}
               </div>
             </div>
@@ -516,7 +529,16 @@ export default function Home() {
                 )}
 
                 {inProgressTickets.map((ticket) => (
-                  <TicketCard key={ticket.id} ticket={ticket} />
+                  <TicketCard
+                    key={ticket.id}
+                    ticket={ticket}
+                    showAssignee={role === "team_leader"}
+                    assigneeEmail={
+                      ticket.assigned_to
+                        ? assigneeEmailById.get(ticket.assigned_to)
+                        : null
+                    }
+                  />
                 ))}
               </div>
             </div>
@@ -531,7 +553,16 @@ export default function Home() {
                 )}
 
                 {waitingTickets.map((ticket) => (
-                  <TicketCard key={ticket.id} ticket={ticket} />
+                  <TicketCard
+                    key={ticket.id}
+                    ticket={ticket}
+                    showAssignee={role === "team_leader"}
+                    assigneeEmail={
+                      ticket.assigned_to
+                        ? assigneeEmailById.get(ticket.assigned_to)
+                        : null
+                    }
+                  />
                 ))}
               </div>
             </div>
@@ -547,7 +578,16 @@ export default function Home() {
                 )}
 
                 {unassignedTickets.map((ticket) => (
-                  <TicketCard key={ticket.id} ticket={ticket} />
+                  <TicketCard
+                    key={ticket.id}
+                    ticket={ticket}
+                    showAssignee={role === "team_leader"}
+                    assigneeEmail={
+                      ticket.assigned_to
+                        ? assigneeEmailById.get(ticket.assigned_to)
+                        : null
+                    }
+                  />
                 ))}
               </div>
             </div>
@@ -595,7 +635,7 @@ export default function Home() {
   );
 }
 
-function TicketCard({ ticket }: any) {
+function TicketCard({ ticket, showAssignee, assigneeEmail }: any) {
   return (
     <div
       className="cursor-pointer rounded border bg-white p-3 shadow-sm hover:bg-gray-50"
@@ -606,6 +646,12 @@ function TicketCard({ ticket }: any) {
       <p className="truncate text-sm text-gray-600">
         {ticket.description}
       </p>
+
+      {showAssignee && (
+        <p className="mt-1 text-xs text-gray-600">
+          Assegnato a: {assigneeEmail || "Nessuno"}
+        </p>
+      )}
 
       <div className="mt-2 flex items-center justify-between">
         <span
