@@ -11,6 +11,7 @@ export default function Home() {
   const [password, setPassword] = useState("");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
+  const [authMode, setAuthMode] = useState<"login" | "signup">("login");
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -38,10 +39,20 @@ export default function Home() {
   const [operatorPerformance, setOperatorPerformance] = useState<any[]>([]);
   const [kpiLoading, setKpiLoading] = useState(false);
   const [currentProfile, setCurrentProfile] = useState<any>(null);
-  const [autoReplyTemplate, setAutoReplyTemplate] = useState("");
-  const [autoReplyEnabled, setAutoReplyEnabled] = useState(true);
+  const [autoReplyTemplates, setAutoReplyTemplates] = useState<any[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null);
+  const [templateEditorBody, setTemplateEditorBody] = useState("");
+  const [templateEditorEnabled, setTemplateEditorEnabled] = useState(true);
   const [autoReplyTemplateLoading, setAutoReplyTemplateLoading] = useState(false);
   const [autoReplyTemplateSaving, setAutoReplyTemplateSaving] = useState(false);
+  const [showTemplateManager, setShowTemplateManager] = useState(false);
+  const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({
+    in_progress: false,
+    assigned: false,
+    waiting: false,
+    unassigned: false,
+    closed: false,
+  });
   const notificationRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -79,7 +90,7 @@ export default function Home() {
   useEffect(() => {
     if (role === "team_leader") {
       loadOperatorPerformance();
-      loadAutoReplyTemplate();
+      loadAutoReplyTemplates();
     } else {
       setOperatorPerformance([]);
     }
@@ -148,8 +159,27 @@ export default function Home() {
   }
 
   async function signIn() {
+    if (!email.trim() || !password.trim()) {
+      alert("Inserisci email e password");
+      return;
+    }
+
     const { error } = await supabase.auth.signInWithPassword({ email, password });
-    alert(error ? error.message : "Login effettuato!");
+    if (error) {
+      const message = error.message.toLowerCase();
+      if (
+        message.includes("invalid login credentials") ||
+        message.includes("invalid") ||
+        message.includes("credenzial")
+      ) {
+        alert("Credenziali non valide. Controlla email e password.");
+      } else {
+        alert(error.message);
+      }
+      return;
+    }
+
+    alert("Login effettuato!");
   }
 
   async function logout() {
@@ -400,33 +430,63 @@ export default function Home() {
     return isWeekendWindow || isWeekdayNightWindow;
   }
 
-  async function loadAutoReplyTemplate() {
+  async function loadAutoReplyTemplates() {
     setAutoReplyTemplateLoading(true);
     const { data, error } = await supabase
       .from("ticket_auto_reply_templates")
-      .select("template_body, is_enabled")
-      .eq("id", 1)
-      .single();
+      .select("id, template_body, is_enabled, updated_at")
+      .order("id", { ascending: true });
 
-    if (!error && data) {
-      setAutoReplyTemplate(data.template_body ?? "");
-      setAutoReplyEnabled(Boolean(data.is_enabled));
+    if (!error) {
+      const templates = data ?? [];
+      setAutoReplyTemplates(templates);
+
+      if (templates.length > 0) {
+        const firstTemplate = templates[0];
+        setSelectedTemplateId(firstTemplate.id);
+        setTemplateEditorBody(firstTemplate.template_body ?? "");
+        setTemplateEditorEnabled(Boolean(firstTemplate.is_enabled));
+      } else {
+        setSelectedTemplateId(null);
+        setTemplateEditorBody("");
+        setTemplateEditorEnabled(true);
+      }
     }
 
     setAutoReplyTemplateLoading(false);
   }
 
+  function selectTemplateForEditing(templateId: number) {
+    const template = autoReplyTemplates.find((item) => item.id === templateId);
+    if (!template) return;
+
+    setSelectedTemplateId(template.id);
+    setTemplateEditorBody(template.template_body ?? "");
+    setTemplateEditorEnabled(Boolean(template.is_enabled));
+  }
+
+  function createNewTemplateDraft() {
+    const maxId = autoReplyTemplates.reduce(
+      (acc, item) => (item.id > acc ? item.id : acc),
+      0
+    );
+    setSelectedTemplateId(maxId + 1);
+    setTemplateEditorBody("");
+    setTemplateEditorEnabled(true);
+  }
+
   async function saveAutoReplyTemplate() {
     if (role !== "team_leader") return;
+    if (!selectedTemplateId) return;
 
     setAutoReplyTemplateSaving(true);
     const { error } = await supabase
       .from("ticket_auto_reply_templates")
       .upsert(
         {
-          id: 1,
-          template_body: autoReplyTemplate.trim(),
-          is_enabled: autoReplyEnabled,
+          id: selectedTemplateId,
+          template_body: templateEditorBody.trim(),
+          is_enabled: templateEditorEnabled,
           updated_by: user?.id ?? null,
           updated_at: new Date().toISOString(),
         },
@@ -438,6 +498,7 @@ export default function Home() {
       alert(error.message);
       return;
     }
+    await loadAutoReplyTemplates();
     alert("Template salvato");
   }
 
@@ -448,11 +509,13 @@ export default function Home() {
 
     const { data: templateData, error: templateError } = await supabase
       .from("ticket_auto_reply_templates")
-      .select("template_body, is_enabled")
-      .eq("id", 1)
-      .single();
+      .select("id, template_body, is_enabled, updated_at")
+      .eq("is_enabled", true)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-    if (templateError || !templateData?.is_enabled) return;
+    if (templateError || !templateData) return;
 
     const message = String(templateData.template_body ?? "").trim();
     if (!message) return;
@@ -651,6 +714,17 @@ export default function Home() {
   const unassignedTickets = filteredTickets.filter(
     (t) => !t.assigned_to && t.status !== "closed"
   );
+  
+  const closedTickets = filteredTickets.filter(
+    (t) => t.status === "closed"
+  );
+
+  function toggleSection(sectionKey: string) {
+    setCollapsedSections((prev) => ({
+      ...prev,
+      [sectionKey]: !prev[sectionKey],
+    }));
+  }
 
   const assigneeNameById = new Map(
     assignableUsers.map((person) => [person.id, getProfileDisplayName(person)])
@@ -724,6 +798,14 @@ export default function Home() {
             >
               {showCreateForm ? "Chiudi form" : "+ Nuovo ticket"}
             </button>
+            {role === "team_leader" && (
+              <button
+                onClick={() => setShowTemplateManager(!showTemplateManager)}
+                className="ml-3 rounded border border-black bg-white px-4 py-2 text-black"
+              >
+                {showTemplateManager ? "Chiudi template" : "Gestione template"}
+              </button>
+            )}
           </div>
 
           {showCreateForm && (
@@ -845,32 +927,80 @@ export default function Home() {
             </div>
           )}
 
-          <div className="mb-6 flex gap-4">
-            <select
-              className="rounded border p-2 text-black"
-              value={filterCategory}
-              onChange={(e) => setFilterCategory(e.target.value)}
-            >
-              <option value="all">Tutte le categorie</option>
-              <option value="general">Generale</option>
-              <option value="it">IT</option>
-              <option value="hr">HR</option>
-              <option value="admin">Amministrazione</option>
-              <option value="bug">Bug</option>
-            </select>
+          {role === "team_leader" && showTemplateManager && (
+            <div className="mb-6 rounded border bg-gray-50 p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-lg font-bold text-black">Gestione template fuori orario</h2>
+                <button
+                  onClick={createNewTemplateDraft}
+                  className="rounded border border-black bg-white px-3 py-1 text-sm text-black"
+                >
+                  + Nuovo template
+                </button>
+              </div>
+              <p className="mb-3 text-xs text-gray-600">
+                Qui puoi creare e aggiornare piu template. In automatico viene usato l'ultimo template attivo aggiornato.
+              </p>
 
-            <select
-              className="rounded border p-2 text-black"
-              value={filterPriority}
-              onChange={(e) => setFilterPriority(e.target.value)}
-            >
-              <option value="all">Tutte le priorità</option>
-              <option value="low">Bassa</option>
-              <option value="medium">Media</option>
-              <option value="high">Alta</option>
-              <option value="urgent">Urgente</option>
-            </select>
-          </div>
+              {autoReplyTemplateLoading ? (
+                <p className="text-sm text-gray-600">Caricamento template...</p>
+              ) : (
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                  <div className="rounded border bg-white p-2">
+                    <p className="mb-2 text-xs font-bold text-gray-700">Template disponibili</p>
+                    {autoReplyTemplates.length === 0 && (
+                      <p className="text-xs text-gray-500">Nessun template salvato.</p>
+                    )}
+                    <div className="space-y-1">
+                      {autoReplyTemplates.map((template) => (
+                        <button
+                          key={template.id}
+                          onClick={() => selectTemplateForEditing(template.id)}
+                          className={`w-full rounded border px-2 py-1 text-left text-xs ${
+                            selectedTemplateId === template.id
+                              ? "border-black bg-gray-100 text-black"
+                              : "border-gray-200 bg-white text-gray-700"
+                          }`}
+                        >
+                          Template #{template.id} {template.is_enabled ? "(attivo)" : "(disattivo)"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <p className="mb-2 text-xs text-gray-700">
+                      Modifica template #{selectedTemplateId ?? "-"}
+                    </p>
+                    <label className="mb-2 flex items-center gap-2 text-sm text-black">
+                      <input
+                        type="checkbox"
+                        checked={templateEditorEnabled}
+                        onChange={(e) => setTemplateEditorEnabled(e.target.checked)}
+                      />
+                      Template attivo
+                    </label>
+
+                    <textarea
+                      className="mb-3 w-full rounded border p-2 text-black"
+                      rows={6}
+                      value={templateEditorBody}
+                      onChange={(e) => setTemplateEditorBody(e.target.value)}
+                      placeholder="Inserisci il template della risposta automatica..."
+                    />
+
+                    <button
+                      onClick={saveAutoReplyTemplate}
+                      disabled={autoReplyTemplateSaving || !selectedTemplateId}
+                      className="rounded bg-black px-4 py-2 text-white disabled:opacity-60"
+                    >
+                      {autoReplyTemplateSaving ? "Salvataggio..." : "Salva template"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {role === "team_leader" && (
             <div className="mb-6 rounded border bg-gray-50 p-4">
@@ -952,77 +1082,43 @@ export default function Home() {
             </div>
           )}
 
-          {role === "team_leader" && (
-            <div className="mb-6 rounded border bg-gray-50 p-4">
-              <h2 className="mb-2 text-lg font-bold text-black">
-                Template risposta automatica fuori orario
-              </h2>
-              <p className="mb-3 text-xs text-gray-600">
-                Inviata per ticket aperti tra le 18:00 e le 09:00 nei feriali, e da venerdi 18:00 a lunedi 09:00.
-              </p>
+          <div className="mb-6 flex gap-4">
+            <select
+              className="rounded border p-2 text-black"
+              value={filterCategory}
+              onChange={(e) => setFilterCategory(e.target.value)}
+            >
+              <option value="all">Tutte le categorie</option>
+              <option value="general">Generale</option>
+              <option value="it">IT</option>
+              <option value="hr">HR</option>
+              <option value="admin">Amministrazione</option>
+              <option value="bug">Bug</option>
+            </select>
 
-              {autoReplyTemplateLoading ? (
-                <p className="text-sm text-gray-600">Caricamento template...</p>
-              ) : (
-                <>
-                  <label className="mb-2 flex items-center gap-2 text-sm text-black">
-                    <input
-                      type="checkbox"
-                      checked={autoReplyEnabled}
-                      onChange={(e) => setAutoReplyEnabled(e.target.checked)}
-                    />
-                    Attiva risposta automatica
-                  </label>
-
-                  <textarea
-                    className="mb-3 w-full rounded border p-2 text-black"
-                    rows={4}
-                    value={autoReplyTemplate}
-                    onChange={(e) => setAutoReplyTemplate(e.target.value)}
-                    placeholder="Inserisci il template della risposta automatica..."
-                  />
-
-                  <button
-                    onClick={saveAutoReplyTemplate}
-                    disabled={autoReplyTemplateSaving}
-                    className="rounded bg-black px-4 py-2 text-white disabled:opacity-60"
-                  >
-                    {autoReplyTemplateSaving ? "Salvataggio..." : "Salva template"}
-                  </button>
-                </>
-              )}
-            </div>
-          )}
+            <select
+              className="rounded border p-2 text-black"
+              value={filterPriority}
+              onChange={(e) => setFilterPriority(e.target.value)}
+            >
+              <option value="all">Tutte le priorità</option>
+              <option value="low">Bassa</option>
+              <option value="medium">Media</option>
+              <option value="high">Alta</option>
+              <option value="urgent">Urgente</option>
+            </select>
+          </div>
 
         <div className="mb-6 space-y-6">
             <div>
-            <h2 className="mb-2 font-bold text-black">
-              🟦 Da fare ({assignedTickets.length})
-            </h2>
-              <div className="space-y-2">
-                {assignedTickets.length === 0 && (
-                  <p className="text-sm text-gray-500">Nessun ticket</p>
-                )}
-
-                {assignedTickets.map((ticket) => (
-                  <TicketCard
-                    key={ticket.id}
-                    ticket={ticket}
-                    showAssignee={role === "team_leader"}
-                    assigneeEmail={
-                      ticket.assigned_to
-                        ? assigneeNameById.get(ticket.assigned_to)
-                        : null
-                    }
-                  />
-                ))}
-              </div>
-            </div>
-
-            <div>
-            <h2 className="mb-2 font-bold text-black">
-              🟩 In lavorazione ({inProgressTickets.length})
-            </h2>
+            <button
+              onClick={() => toggleSection("in_progress")}
+              className="mb-2 flex w-full items-center justify-between text-left font-bold text-black"
+            >
+              <span>🟩 In lavorazione ({inProgressTickets.length})</span>
+              <span>{collapsedSections.in_progress ? "Apri" : "Chiudi"}</span>
+            </button>
+              {!collapsedSections.in_progress && (
               <div className="space-y-2">
                 {inProgressTickets.length === 0 && (
                   <p className="text-sm text-gray-500">Nessun ticket</p>
@@ -1041,12 +1137,48 @@ export default function Home() {
                   />
                 ))}
               </div>
+              )}
             </div>
 
             <div>
-            <h2 className="mb-2 font-bold text-black">
-              🟨 In attesa ({waitingTickets.length})
-            </h2>
+            <button
+              onClick={() => toggleSection("assigned")}
+              className="mb-2 flex w-full items-center justify-between text-left font-bold text-black"
+            >
+              <span>🟦 Da fare ({assignedTickets.length})</span>
+              <span>{collapsedSections.assigned ? "Apri" : "Chiudi"}</span>
+            </button>
+              {!collapsedSections.assigned && (
+              <div className="space-y-2">
+                {assignedTickets.length === 0 && (
+                  <p className="text-sm text-gray-500">Nessun ticket</p>
+                )}
+
+                {assignedTickets.map((ticket) => (
+                  <TicketCard
+                    key={ticket.id}
+                    ticket={ticket}
+                    showAssignee={role === "team_leader"}
+                    assigneeEmail={
+                      ticket.assigned_to
+                        ? assigneeNameById.get(ticket.assigned_to)
+                        : null
+                    }
+                  />
+                ))}
+              </div>
+              )}
+            </div>
+
+            <div>
+            <button
+              onClick={() => toggleSection("waiting")}
+              className="mb-2 flex w-full items-center justify-between text-left font-bold text-black"
+            >
+              <span>🟨 In attesa ({waitingTickets.length})</span>
+              <span>{collapsedSections.waiting ? "Apri" : "Chiudi"}</span>
+            </button>
+              {!collapsedSections.waiting && (
               <div className="space-y-2">
                 {waitingTickets.length === 0 && (
                   <p className="text-sm text-gray-500">Nessun ticket</p>
@@ -1065,13 +1197,18 @@ export default function Home() {
                   />
                 ))}
               </div>
+              )}
             </div>
 
             <div>
-              <h2 className="mb-2 font-bold text-black">
-                ⚪ Non assegnati ({unassignedTickets.length})
-              </h2>
-
+              <button
+                onClick={() => toggleSection("unassigned")}
+                className="mb-2 flex w-full items-center justify-between text-left font-bold text-black"
+              >
+                <span>⚪ Non assegnati ({unassignedTickets.length})</span>
+                <span>{collapsedSections.unassigned ? "Apri" : "Chiudi"}</span>
+              </button>
+              {!collapsedSections.unassigned && (
               <div className="space-y-2">
                 {unassignedTickets.length === 0 && (
                   <p className="text-sm text-gray-500">Nessun ticket</p>
@@ -1090,6 +1227,37 @@ export default function Home() {
                   />
                 ))}
               </div>
+              )}
+            </div>
+
+            <div>
+              <button
+                onClick={() => toggleSection("closed")}
+                className="mb-2 flex w-full items-center justify-between text-left font-bold text-black"
+              >
+                <span>⚫ Chiusi ({closedTickets.length})</span>
+                <span>{collapsedSections.closed ? "Apri" : "Chiudi"}</span>
+              </button>
+              {!collapsedSections.closed && (
+              <div className="space-y-2">
+                {closedTickets.length === 0 && (
+                  <p className="text-sm text-gray-500">Nessun ticket</p>
+                )}
+
+                {closedTickets.map((ticket) => (
+                  <TicketCard
+                    key={ticket.id}
+                    ticket={ticket}
+                    showAssignee={role === "team_leader"}
+                    assigneeEmail={
+                      ticket.assigned_to
+                        ? assigneeNameById.get(ticket.assigned_to)
+                        : null
+                    }
+                  />
+                ))}
+              </div>
+              )}
             </div>
 
           </div>
@@ -1106,21 +1274,50 @@ export default function Home() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-gray-100">
       <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow">
-        <h1 className="mb-6 text-2xl font-bold text-black">Login Ticketing</h1>
+        <h1 className="mb-4 text-2xl font-bold text-black">
+          {authMode === "login" ? "Login Ticketing" : "Registrazione Ticketing"}
+        </h1>
 
-        <input
-          className="mb-3 w-full rounded border p-2 text-black"
-          placeholder="Nome"
-          value={firstName}
-          onChange={(e) => setFirstName(e.target.value)}
-        />
+        <div className="mb-4 flex gap-2">
+          <button
+            onClick={() => setAuthMode("login")}
+            className={`w-1/2 rounded border p-2 text-sm ${
+              authMode === "login"
+                ? "border-black bg-black text-white"
+                : "border-gray-300 bg-white text-black"
+            }`}
+          >
+            Login
+          </button>
+          <button
+            onClick={() => setAuthMode("signup")}
+            className={`w-1/2 rounded border p-2 text-sm ${
+              authMode === "signup"
+                ? "border-black bg-black text-white"
+                : "border-gray-300 bg-white text-black"
+            }`}
+          >
+            Registrazione
+          </button>
+        </div>
 
-        <input
-          className="mb-3 w-full rounded border p-2 text-black"
-          placeholder="Cognome"
-          value={lastName}
-          onChange={(e) => setLastName(e.target.value)}
-        />
+        {authMode === "signup" && (
+          <>
+            <input
+              className="mb-3 w-full rounded border p-2 text-black"
+              placeholder="Nome"
+              value={firstName}
+              onChange={(e) => setFirstName(e.target.value)}
+            />
+
+            <input
+              className="mb-3 w-full rounded border p-2 text-black"
+              placeholder="Cognome"
+              value={lastName}
+              onChange={(e) => setLastName(e.target.value)}
+            />
+          </>
+        )}
 
         <input
           className="mb-3 w-full rounded border p-2 text-black"
@@ -1137,13 +1334,17 @@ export default function Home() {
           onChange={(e) => setPassword(e.target.value)}
         />
 
-        <button onClick={signIn} className="mb-3 w-full rounded bg-black p-2 text-white">
-          Accedi
-        </button>
+        {authMode === "login" && (
+          <button onClick={signIn} className="mb-3 w-full rounded bg-black p-2 text-white">
+            Accedi
+          </button>
+        )}
 
-        <button onClick={signUp} className="w-full rounded border p-2 text-black">
-          Registrati
-        </button>
+        {authMode === "signup" && (
+          <button onClick={signUp} className="w-full rounded border p-2 text-black">
+            Registrati
+          </button>
+        )}
       </div>
     </main>
   );
