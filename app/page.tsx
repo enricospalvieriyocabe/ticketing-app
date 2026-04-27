@@ -51,6 +51,7 @@ export default function Home() {
   const [autoReplyTemplateLoading, setAutoReplyTemplateLoading] = useState(false);
   const [autoReplyTemplateSaving, setAutoReplyTemplateSaving] = useState(false);
   const [showTemplateManager, setShowTemplateManager] = useState(false);
+  const [showOnlyCriticalUrgent, setShowOnlyCriticalUrgent] = useState(false);
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({
     in_progress: false,
     assigned: false,
@@ -464,6 +465,30 @@ export default function Home() {
     return `${hours.toFixed(1)}h`;
   }
 
+  function getSlaRiskLabel(breachRate: number) {
+    if (breachRate >= 0.3) return "Alto";
+    if (breachRate >= 0.15) return "Medio";
+    return "Basso";
+  }
+
+  function getSlaRiskClass(riskLabel: string) {
+    if (riskLabel === "Alto") return "bg-red-100 text-red-700";
+    if (riskLabel === "Medio") return "bg-yellow-100 text-yellow-700";
+    return "bg-green-100 text-green-700";
+  }
+
+  function getUrgentRiskClass(progress: number) {
+    if (progress >= 1) return "bg-red-100 text-red-700";
+    if (progress >= 0.8) return "bg-yellow-100 text-yellow-700";
+    return "bg-green-100 text-green-700";
+  }
+
+  function getUrgentRiskLabel(progress: number) {
+    if (progress >= 1) return "Fuori SLA";
+    if (progress >= 0.8) return "A rischio";
+    return "Sotto controllo";
+  }
+
   function getEuropeRomeParts(date: Date) {
     const formatter = new Intl.DateTimeFormat("en-US", {
       timeZone: "Europe/Rome",
@@ -740,6 +765,8 @@ export default function Home() {
         ...item,
         avgResolution,
         avgFirstTake,
+        breachRate:
+          item.closedCount > 0 ? item.slaBreaches / item.closedCount : 0,
       };
     });
 
@@ -794,6 +821,65 @@ export default function Home() {
   const closedTickets = filteredTickets.filter(
     (t) => t.status === "closed"
   );
+
+  const nowMs = Date.now();
+  const globalSlaHours = Number(slaHours);
+  const atRiskTicketsCount = filteredTickets.filter((ticket) => {
+    if (ticket.status === "closed") return false;
+    const createdAtMs = new Date(ticket.created_at ?? "").getTime();
+    if (Number.isNaN(createdAtMs) || Number.isNaN(globalSlaHours)) return false;
+    return (nowMs - createdAtMs) / 3600000 >= globalSlaHours;
+  }).length;
+
+  const avgResolutionTeam =
+    operatorPerformance.length > 0
+      ? operatorPerformance
+          .filter((row) => row.avgResolution !== null)
+          .reduce((acc, row) => acc + row.avgResolution, 0) /
+        Math.max(
+          operatorPerformance.filter((row) => row.avgResolution !== null).length,
+          1
+        )
+      : null;
+
+  const highRiskOperators = operatorPerformance.filter(
+    (row) => getSlaRiskLabel(row.breachRate ?? 0) === "Alto"
+  ).length;
+  const urgentTickets = filteredTickets
+    .filter((ticket) => ticket.status !== "closed")
+    .map((ticket) => {
+      const createdAtMs = new Date(ticket.created_at ?? "").getTime();
+      const ageHours = Number.isNaN(createdAtMs) ? 0 : (nowMs - createdAtMs) / 3600000;
+      const slaProgress =
+        Number.isNaN(globalSlaHours) || globalSlaHours <= 0 ? 0 : ageHours / globalSlaHours;
+
+      return {
+        ...ticket,
+        ageHours,
+        slaProgress,
+      };
+    })
+    .sort((a, b) => {
+      const slaRankA = a.slaProgress >= 1 ? 2 : a.slaProgress >= 0.8 ? 1 : 0;
+      const slaRankB = b.slaProgress >= 1 ? 2 : b.slaProgress >= 0.8 ? 1 : 0;
+      if (slaRankA !== slaRankB) return slaRankB - slaRankA;
+
+      const priorityWeight: Record<string, number> = {
+        urgent: 4,
+        high: 3,
+        medium: 2,
+        low: 1,
+      };
+      const priorityA = priorityWeight[a.priority ?? "low"] ?? 0;
+      const priorityB = priorityWeight[b.priority ?? "low"] ?? 0;
+      if (priorityA !== priorityB) return priorityB - priorityA;
+
+      return b.slaProgress - a.slaProgress;
+    })
+    .slice(0, 5);
+  const urgentTicketsToShow = showOnlyCriticalUrgent
+    ? urgentTickets.filter((ticket) => ticket.slaProgress >= 0.8)
+    : urgentTickets;
 
   function toggleSection(sectionKey: string) {
     setCollapsedSections((prev) => ({
@@ -1097,6 +1183,79 @@ export default function Home() {
                 Dashboard performance operatori
               </h2>
 
+              <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-5">
+                <div className="rounded border bg-white p-3">
+                  <p className="text-xs text-gray-500">Backlog aperto</p>
+                  <p className="text-xl font-bold text-black">
+                    {assignedTickets.length + inProgressTickets.length + waitingTickets.length}
+                  </p>
+                </div>
+                <div className="rounded border bg-white p-3">
+                  <p className="text-xs text-gray-500">Ticket fuori soglia SLA</p>
+                  <p className="text-xl font-bold text-red-700">{atRiskTicketsCount}</p>
+                </div>
+                <div className="rounded border bg-white p-3">
+                  <p className="text-xs text-gray-500">Tempo medio risoluzione team</p>
+                  <p className="text-xl font-bold text-black">{formatHours(avgResolutionTeam)}</p>
+                </div>
+                <div className="rounded border bg-white p-3">
+                  <p className="text-xs text-gray-500">Ticket chiusi (filtro attivo)</p>
+                  <p className="text-xl font-bold text-black">{closedTickets.length}</p>
+                </div>
+                <div className="rounded border bg-white p-3">
+                  <p className="text-xs text-gray-500">Operatori a rischio alto</p>
+                  <p className="text-xl font-bold text-orange-700">{highRiskOperators}</p>
+                </div>
+              </div>
+
+              <div className="mb-4 rounded border bg-white p-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <h3 className="text-sm font-bold text-black">Interventi urgenti</h3>
+                  <label className="flex items-center gap-2 text-xs text-gray-700">
+                    <input
+                      type="checkbox"
+                      checked={showOnlyCriticalUrgent}
+                      onChange={(e) => setShowOnlyCriticalUrgent(e.target.checked)}
+                    />
+                    Solo sopra 80% SLA
+                  </label>
+                </div>
+                {urgentTicketsToShow.length === 0 ? (
+                  <p className="text-xs text-gray-500">Nessun ticket urgente nel filtro attivo.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {urgentTicketsToShow.map((ticket) => (
+                      <div
+                        key={ticket.id}
+                        className="flex items-center justify-between rounded border p-2 text-sm"
+                      >
+                        <div className="min-w-0 pr-2">
+                          <p className="truncate font-semibold text-black">{ticket.title}</p>
+                          <div className="mt-1 flex items-center gap-2">
+                            <span
+                              className={`rounded px-2 py-0.5 text-[10px] font-bold ${getUrgentRiskClass(
+                                ticket.slaProgress
+                              )}`}
+                            >
+                              {getUrgentRiskLabel(ticket.slaProgress)}
+                            </span>
+                            <p className="text-xs text-gray-600">
+                              {ticket.status} - ETA SLA: {(globalSlaHours - ticket.ageHours).toFixed(1)}h
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => (window.location.href = `/ticket/${ticket.id}`)}
+                          className="rounded bg-black px-3 py-1 text-xs text-white"
+                        >
+                          Apri
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-4">
                 <label className="text-sm text-black">
                   Data inizio
@@ -1151,6 +1310,7 @@ export default function Home() {
                         <th className="border px-2 py-2 text-left">Tempo medio risoluzione</th>
                         <th className="border px-2 py-2 text-left">Tempo medio presa in carico</th>
                         <th className="border px-2 py-2 text-left">Fuori SLA</th>
+                        <th className="border px-2 py-2 text-left">Rischio SLA</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1162,6 +1322,15 @@ export default function Home() {
                           <td className="border px-2 py-2">{formatHours(row.avgResolution)}</td>
                           <td className="border px-2 py-2">{formatHours(row.avgFirstTake)}</td>
                           <td className="border px-2 py-2">{row.slaBreaches}</td>
+                          <td className="border px-2 py-2">
+                            <span
+                              className={`rounded px-2 py-1 text-xs font-bold ${getSlaRiskClass(
+                                getSlaRiskLabel(row.breachRate ?? 0)
+                              )}`}
+                            >
+                              {getSlaRiskLabel(row.breachRate ?? 0)}
+                            </span>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
