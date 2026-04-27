@@ -18,6 +18,8 @@ export default function TicketPage() {
 
   const [comments, setComments] = useState<any[]>([]);
   const [newComment, setNewComment] = useState("");
+  const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
+  const [editingCommentBody, setEditingCommentBody] = useState("");
 
   const [events, setEvents] = useState<any[]>([]);
   const [handoffNote, setHandoffNote] = useState("");
@@ -114,6 +116,38 @@ export default function TicketPage() {
     }
   }
 
+  async function startEditComment(comment: any) {
+    setEditingCommentId(comment.id);
+    setEditingCommentBody(comment.body ?? "");
+  }
+
+  function cancelEditComment() {
+    setEditingCommentId(null);
+    setEditingCommentBody("");
+  }
+
+  async function saveEditedComment(commentId: string) {
+    if (!user) return;
+    if (!editingCommentBody.trim()) {
+      alert("Il commento non puo essere vuoto");
+      return;
+    }
+
+    const { error } = await supabase
+      .from("ticket_comments")
+      .update({ body: editingCommentBody.trim() })
+      .eq("id", commentId)
+      .eq("user_id", user.id);
+
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
+    cancelEditComment();
+    loadComments();
+  }
+
   async function addEvent(type: string, description: string) {
     if (!user) return;
   
@@ -162,47 +196,63 @@ export default function TicketPage() {
   }
 
   async function loadProfiles(ticket: any) {
+    function getProfileDisplayName(profile: any) {
+      if (!profile) return "Utente";
+      const fullName = String(profile.full_name ?? "").trim();
+      const composedName = `${profile.first_name ?? ""} ${profile.last_name ?? ""}`.trim();
+      const genericName = String(profile.name ?? "").trim();
+      return fullName || composedName || genericName || profile.email || "Utente";
+    }
+
     // requester
     if (ticket.requester_id) {
       const { data } = await supabase
         .from("profiles")
-        .select("email, role")
+        .select("*")
         .eq("id", ticket.requester_id)
         .single();
   
-      setRequester(data);
+      setRequester(data ? { ...data, display_name: getProfileDisplayName(data) } : null);
     }
   
     // assignee
     if (ticket.assigned_to) {
       const { data } = await supabase
         .from("profiles")
-        .select("email, role")
+        .select("*")
         .eq("id", ticket.assigned_to)
         .single();
   
-      setAssignee(data);
+      setAssignee(data ? { ...data, display_name: getProfileDisplayName(data) } : null);
     }
   
     // creator
     if (ticket.created_by) {
       const { data } = await supabase
         .from("profiles")
-        .select("email, role")
+        .select("*")
         .eq("id", ticket.created_by)
         .single();
   
-      setCreator(data);
+      setCreator(data ? { ...data, display_name: getProfileDisplayName(data) } : null);
     }
   }
 
   async function loadAssignableUsers() {
     const { data } = await supabase
       .from("profiles")
-      .select("id, email, role")
+      .select("*")
       .in("role", ["operator", "team_leader"]);
 
-    setAssignableUsers(data ?? []);
+    const usersWithDisplayName = (data ?? []).map((person) => {
+      const fullName = String(person.full_name ?? "").trim();
+      const composedName = `${person.first_name ?? ""} ${person.last_name ?? ""}`.trim();
+      const genericName = String(person.name ?? "").trim();
+      const displayName = fullName || composedName || genericName || person.email || "Utente";
+      return { ...person, display_name: displayName };
+    });
+
+    setAssignableUsers(usersWithDisplayName);
   }
 
   async function assignTicket(assigneeId: string) {
@@ -361,6 +411,11 @@ export default function TicketPage() {
               <div className="space-y-2">
               {comments.map((c) => {
                 const isMine = c.user_id === user?.id;
+                const isEditing = editingCommentId === c.id;
+                const wasEdited =
+                  c.updated_at &&
+                  c.created_at &&
+                  new Date(c.updated_at).getTime() > new Date(c.created_at).getTime();
 
                 return (
                   <div
@@ -379,9 +434,51 @@ export default function TicketPage() {
                       </p>
                     </div>
 
-                    <p className="text-black">
-                      {renderCommentWithMentions(c.body)}
-                    </p>
+                    {isEditing ? (
+                      <div>
+                        <textarea
+                          className="w-full rounded border p-2 text-black"
+                          value={editingCommentBody}
+                          onChange={(e) => setEditingCommentBody(e.target.value)}
+                        />
+
+                        <div className="mt-2 flex gap-2">
+                          <button
+                            onClick={() => saveEditedComment(c.id)}
+                            className="rounded bg-green-600 px-3 py-1 text-white"
+                          >
+                            Salva
+                          </button>
+                          <button
+                            onClick={cancelEditComment}
+                            className="rounded bg-gray-500 px-3 py-1 text-white"
+                          >
+                            Annulla
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <p className="text-black">
+                          {renderCommentWithMentions(c.body)}
+                        </p>
+
+                        {wasEdited && (
+                          <p className="mt-1 text-xs text-gray-500">
+                            (modificato il {new Date(c.updated_at).toLocaleString("it-IT")})
+                          </p>
+                        )}
+
+                        {isMine && (
+                          <button
+                            onClick={() => startEditComment(c)}
+                            className="mt-2 rounded bg-gray-200 px-2 py-1 text-xs text-black"
+                          >
+                            Modifica
+                          </button>
+                        )}
+                      </>
+                    )}
                   </div>
                 );
               })}
@@ -434,9 +531,9 @@ export default function TicketPage() {
   
             <div className="rounded border bg-gray-50 p-3 text-sm text-gray-700">
               <h2 className="mb-2 font-bold text-black">Persone</h2>
-              {requester && <p>Richiedente: {requester.email}</p>}
-              {creator && <p>Creato da: {creator.email}</p>}
-              {assignee && <p>Assegnato a: {assignee.email}</p>}
+              {requester && <p>Richiedente: {requester.display_name}</p>}
+              {creator && <p>Creato da: {creator.display_name}</p>}
+              {assignee && <p>Assegnato a: {assignee.display_name}</p>}
               {!assignee && <p>Assegnato a: Nessuno</p>}
             </div>
   
@@ -507,7 +604,7 @@ export default function TicketPage() {
   
                   {assignableUsers.map((person: any) => (
                     <option key={person.id} value={person.id}>
-                      {person.email} ({person.role})
+                      {person.display_name} ({person.role})
                     </option>
                   ))}
                 </select>
@@ -534,7 +631,7 @@ export default function TicketPage() {
 
                   {assignableUsers.map((person: any) => (
                     <option key={person.id} value={person.id}>
-                      {person.email} ({person.role})
+                      {person.display_name} ({person.role})
                     </option>
                   ))}
                 </select>

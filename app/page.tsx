@@ -8,6 +8,8 @@ export default function Home() {
   const [role, setRole] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -34,6 +36,7 @@ export default function Home() {
   const [slaHours, setSlaHours] = useState("24");
   const [operatorPerformance, setOperatorPerformance] = useState<any[]>([]);
   const [kpiLoading, setKpiLoading] = useState(false);
+  const [currentProfile, setCurrentProfile] = useState<any>(null);
   const notificationRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -88,8 +91,48 @@ export default function Home() {
   }, []);
 
   async function signUp() {
-    const { error } = await supabase.auth.signUp({ email, password });
-    alert(error ? error.message : "Controlla la mail per confermare");
+    const first = firstName.trim();
+    const last = lastName.trim();
+    const full = `${first} ${last}`.trim();
+
+    if (!first || !last) {
+      alert("Inserisci nome e cognome");
+      return;
+    }
+
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          first_name: first,
+          last_name: last,
+          full_name: full,
+        },
+      },
+    });
+
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
+    if (data.user?.id) {
+      await supabase.from("profiles").upsert(
+        {
+          id: data.user.id,
+          email,
+          first_name: first,
+          last_name: last,
+          full_name: full,
+        },
+        { onConflict: "id" }
+      );
+    }
+
+    setFirstName("");
+    setLastName("");
+    alert("Controlla la mail per confermare");
   }
 
   async function signIn() {
@@ -104,16 +147,24 @@ export default function Home() {
   async function loadAssignableUsers() {
     const { data } = await supabase
       .from("profiles")
-      .select("id, email, role")
+      .select("*")
       .in("role", ["operator", "team_leader"]);
 
     setAssignableUsers(data ?? []);
   }
 
+  function getProfileDisplayName(profile: any) {
+    if (!profile) return "Utente";
+    const fullName = String(profile.full_name ?? "").trim();
+    const composedName = `${profile.first_name ?? ""} ${profile.last_name ?? ""}`.trim();
+    const genericName = String(profile.name ?? "").trim();
+    return fullName || composedName || genericName || profile.email || "Utente";
+  }
+
   async function loadTickets(currentUser: any) {
     const { data: profile } = await supabase
       .from("profiles")
-      .select("role")
+      .select("*")
       .eq("id", currentUser.id)
       .single();
 
@@ -123,6 +174,7 @@ export default function Home() {
     }
 
     setRole(profile.role);
+    setCurrentProfile(profile);
 
     let query = supabase.from("tickets").select("*");
 
@@ -279,7 +331,7 @@ export default function Home() {
     else if (user) {
       const assignee = assignableUsers.find((person) => person.id === assigneeId);
       const description = assignee
-        ? `Ticket assegnato a ${assignee.email}`
+        ? `Ticket assegnato a ${getProfileDisplayName(assignee)}`
         : "Assegnazione rimossa";
 
       await addTicketEvent(ticketId, "assigned", description);
@@ -344,7 +396,7 @@ export default function Home() {
         operator.id,
         {
           operatorId: operator.id,
-          operatorEmail: operator.email,
+          operatorName: getProfileDisplayName(operator),
           closedCount: 0,
           inProgressCount: 0,
           firstTakeSamples: [] as number[],
@@ -475,8 +527,8 @@ export default function Home() {
     (t) => !t.assigned_to && t.status !== "closed"
   );
 
-  const assigneeEmailById = new Map(
-    assignableUsers.map((person) => [person.id, person.email])
+  const assigneeNameById = new Map(
+    assignableUsers.map((person) => [person.id, getProfileDisplayName(person)])
   );
 
   if (user) {
@@ -487,7 +539,7 @@ export default function Home() {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-2xl font-bold text-black">Dashboard Ticketing</h1>
-              <p className="text-black">Benvenuto {user.email}</p>
+              <p className="text-black">Benvenuto {getProfileDisplayName(currentProfile)}</p>
               <p className="text-sm text-gray-600">Ruolo: {role}</p>
             </div>
 
@@ -752,7 +804,7 @@ export default function Home() {
                     <tbody>
                       {operatorPerformance.map((row) => (
                         <tr key={row.operatorId} className="bg-white">
-                          <td className="border px-2 py-2">{row.operatorEmail}</td>
+                          <td className="border px-2 py-2">{row.operatorName}</td>
                           <td className="border px-2 py-2">{row.closedCount}</td>
                           <td className="border px-2 py-2">{row.inProgressCount}</td>
                           <td className="border px-2 py-2">{formatHours(row.avgResolution)}</td>
@@ -784,7 +836,7 @@ export default function Home() {
                     showAssignee={role === "team_leader"}
                     assigneeEmail={
                       ticket.assigned_to
-                        ? assigneeEmailById.get(ticket.assigned_to)
+                        ? assigneeNameById.get(ticket.assigned_to)
                         : null
                     }
                   />
@@ -808,7 +860,7 @@ export default function Home() {
                     showAssignee={role === "team_leader"}
                     assigneeEmail={
                       ticket.assigned_to
-                        ? assigneeEmailById.get(ticket.assigned_to)
+                        ? assigneeNameById.get(ticket.assigned_to)
                         : null
                     }
                   />
@@ -832,7 +884,7 @@ export default function Home() {
                     showAssignee={role === "team_leader"}
                     assigneeEmail={
                       ticket.assigned_to
-                        ? assigneeEmailById.get(ticket.assigned_to)
+                        ? assigneeNameById.get(ticket.assigned_to)
                         : null
                     }
                   />
@@ -857,7 +909,7 @@ export default function Home() {
                     showAssignee={role === "team_leader"}
                     assigneeEmail={
                       ticket.assigned_to
-                        ? assigneeEmailById.get(ticket.assigned_to)
+                        ? assigneeNameById.get(ticket.assigned_to)
                         : null
                     }
                   />
@@ -880,6 +932,20 @@ export default function Home() {
     <main className="flex min-h-screen items-center justify-center bg-gray-100">
       <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow">
         <h1 className="mb-6 text-2xl font-bold text-black">Login Ticketing</h1>
+
+        <input
+          className="mb-3 w-full rounded border p-2 text-black"
+          placeholder="Nome"
+          value={firstName}
+          onChange={(e) => setFirstName(e.target.value)}
+        />
+
+        <input
+          className="mb-3 w-full rounded border p-2 text-black"
+          placeholder="Cognome"
+          value={lastName}
+          onChange={(e) => setLastName(e.target.value)}
+        />
 
         <input
           className="mb-3 w-full rounded border p-2 text-black"
