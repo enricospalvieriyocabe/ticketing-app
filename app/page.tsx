@@ -39,8 +39,13 @@ export default function Home() {
   const [operatorPerformance, setOperatorPerformance] = useState<any[]>([]);
   const [kpiLoading, setKpiLoading] = useState(false);
   const [currentProfile, setCurrentProfile] = useState<any>(null);
+  const [profileNameById, setProfileNameById] = useState<Record<string, string>>({});
+  const [closedInfoByTicketId, setClosedInfoByTicketId] = useState<
+    Record<string, { closedByName: string; closedAt: string }>
+  >({});
   const [autoReplyTemplates, setAutoReplyTemplates] = useState<any[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null);
+  const [templateEditorTitle, setTemplateEditorTitle] = useState("");
   const [templateEditorBody, setTemplateEditorBody] = useState("");
   const [templateEditorEnabled, setTemplateEditorEnabled] = useState(true);
   const [autoReplyTemplateLoading, setAutoReplyTemplateLoading] = useState(false);
@@ -95,6 +100,10 @@ export default function Home() {
       setOperatorPerformance([]);
     }
   }, [role, tickets, assignableUsers, kpiStartDate, kpiEndDate, slaHours]);
+
+  useEffect(() => {
+    loadTicketListMetadata();
+  }, [tickets]);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -243,6 +252,59 @@ export default function Home() {
       .order("created_at", { ascending: false });
   
     setNotifications(data ?? []);
+  }
+
+  async function loadTicketListMetadata() {
+    if (tickets.length === 0) {
+      setProfileNameById({});
+      setClosedInfoByTicketId({});
+      return;
+    }
+
+    const baseUserIds = tickets
+      .flatMap((ticket) => [ticket.requester_id, ticket.created_by, ticket.assigned_to])
+      .filter((id) => Boolean(id));
+    const closedTicketIds = tickets
+      .filter((ticket) => ticket.status === "closed")
+      .map((ticket) => ticket.id);
+
+    let closerEvents: any[] = [];
+    if (closedTicketIds.length > 0) {
+      const { data } = await supabase
+        .from("ticket_events")
+        .select("ticket_id, user_id, created_at")
+        .in("ticket_id", closedTicketIds)
+        .eq("type", "closed")
+        .order("created_at", { ascending: false });
+      closerEvents = data ?? [];
+    }
+
+    const allUserIds = Array.from(
+      new Set([...baseUserIds, ...closerEvents.map((event) => event.user_id)].filter(Boolean))
+    );
+    if (allUserIds.length === 0) return;
+
+    const { data: profiles } = await supabase
+      .from("profiles")
+      .select("*")
+      .in("id", allUserIds);
+
+    const names: Record<string, string> = {};
+    for (const profile of profiles ?? []) {
+      names[profile.id] = getProfileDisplayName(profile);
+    }
+    setProfileNameById(names);
+
+    const closedMap: Record<string, { closedByName: string; closedAt: string }> = {};
+    for (const event of closerEvents) {
+      if (!closedMap[event.ticket_id]) {
+        closedMap[event.ticket_id] = {
+          closedByName: names[event.user_id] || "N/D",
+          closedAt: event.created_at,
+        };
+      }
+    }
+    setClosedInfoByTicketId(closedMap);
   }
 
   async function markAsRead(notificationId: string, ticketId: string) {
@@ -434,7 +496,7 @@ export default function Home() {
     setAutoReplyTemplateLoading(true);
     const { data, error } = await supabase
       .from("ticket_auto_reply_templates")
-      .select("id, template_body, is_enabled, updated_at")
+      .select("id, title, template_body, is_enabled, updated_at")
       .order("id", { ascending: true });
 
     if (!error) {
@@ -444,10 +506,12 @@ export default function Home() {
       if (templates.length > 0) {
         const firstTemplate = templates[0];
         setSelectedTemplateId(firstTemplate.id);
+        setTemplateEditorTitle(firstTemplate.title ?? "");
         setTemplateEditorBody(firstTemplate.template_body ?? "");
         setTemplateEditorEnabled(Boolean(firstTemplate.is_enabled));
       } else {
-        setSelectedTemplateId(null);
+        setSelectedTemplateId(1);
+        setTemplateEditorTitle("");
         setTemplateEditorBody("");
         setTemplateEditorEnabled(true);
       }
@@ -461,6 +525,7 @@ export default function Home() {
     if (!template) return;
 
     setSelectedTemplateId(template.id);
+    setTemplateEditorTitle(template.title ?? "");
     setTemplateEditorBody(template.template_body ?? "");
     setTemplateEditorEnabled(Boolean(template.is_enabled));
   }
@@ -471,20 +536,31 @@ export default function Home() {
       0
     );
     setSelectedTemplateId(maxId + 1);
+    setTemplateEditorTitle("");
     setTemplateEditorBody("");
     setTemplateEditorEnabled(true);
   }
 
   async function saveAutoReplyTemplate() {
     if (role !== "team_leader") return;
-    if (!selectedTemplateId) return;
+
+    let templateId = selectedTemplateId;
+    if (!templateId) {
+      const maxId = autoReplyTemplates.reduce(
+        (acc, item) => (item.id > acc ? item.id : acc),
+        0
+      );
+      templateId = maxId + 1;
+      setSelectedTemplateId(templateId);
+    }
 
     setAutoReplyTemplateSaving(true);
     const { error } = await supabase
       .from("ticket_auto_reply_templates")
       .upsert(
         {
-          id: selectedTemplateId,
+          id: templateId,
+          title: templateEditorTitle.trim() || `Template #${templateId}`,
           template_body: templateEditorBody.trim(),
           is_enabled: templateEditorEnabled,
           updated_by: user?.id ?? null,
@@ -509,7 +585,7 @@ export default function Home() {
 
     const { data: templateData, error: templateError } = await supabase
       .from("ticket_auto_reply_templates")
-      .select("id, template_body, is_enabled, updated_at")
+      .select("id, title, template_body, is_enabled, updated_at")
       .eq("is_enabled", true)
       .order("updated_at", { ascending: false })
       .limit(1)
@@ -724,6 +800,14 @@ export default function Home() {
       ...prev,
       [sectionKey]: !prev[sectionKey],
     }));
+  }
+
+  function getOpenedByName(ticket: any) {
+    return (
+      profileNameById[ticket.requester_id] ||
+      profileNameById[ticket.created_by] ||
+      "N/D"
+    );
   }
 
   const assigneeNameById = new Map(
@@ -962,16 +1046,21 @@ export default function Home() {
                               : "border-gray-200 bg-white text-gray-700"
                           }`}
                         >
-                          Template #{template.id} {template.is_enabled ? "(attivo)" : "(disattivo)"}
+                          {(template.title || `Template #${template.id}`)}{" "}
+                          {template.is_enabled ? "(attivo)" : "(disattivo)"}
                         </button>
                       ))}
                     </div>
                   </div>
 
                   <div className="md:col-span-2">
-                    <p className="mb-2 text-xs text-gray-700">
-                      Modifica template #{selectedTemplateId ?? "-"}
-                    </p>
+                    <p className="mb-2 text-xs text-gray-700">Modifica template</p>
+                    <input
+                      className="mb-2 w-full rounded border p-2 text-black"
+                      placeholder="Titolo template (es. Weekend)"
+                      value={templateEditorTitle}
+                      onChange={(e) => setTemplateEditorTitle(e.target.value)}
+                    />
                     <label className="mb-2 flex items-center gap-2 text-sm text-black">
                       <input
                         type="checkbox"
@@ -991,7 +1080,7 @@ export default function Home() {
 
                     <button
                       onClick={saveAutoReplyTemplate}
-                      disabled={autoReplyTemplateSaving || !selectedTemplateId}
+                    disabled={autoReplyTemplateSaving}
                       className="rounded bg-black px-4 py-2 text-white disabled:opacity-60"
                     >
                       {autoReplyTemplateSaving ? "Salvataggio..." : "Salva template"}
@@ -1134,6 +1223,9 @@ export default function Home() {
                         ? assigneeNameById.get(ticket.assigned_to)
                         : null
                     }
+                    openedByName={getOpenedByName(ticket)}
+                    closedByName={closedInfoByTicketId[ticket.id]?.closedByName}
+                    closedAt={closedInfoByTicketId[ticket.id]?.closedAt}
                   />
                 ))}
               </div>
@@ -1164,6 +1256,9 @@ export default function Home() {
                         ? assigneeNameById.get(ticket.assigned_to)
                         : null
                     }
+                    openedByName={getOpenedByName(ticket)}
+                    closedByName={closedInfoByTicketId[ticket.id]?.closedByName}
+                    closedAt={closedInfoByTicketId[ticket.id]?.closedAt}
                   />
                 ))}
               </div>
@@ -1194,6 +1289,9 @@ export default function Home() {
                         ? assigneeNameById.get(ticket.assigned_to)
                         : null
                     }
+                    openedByName={getOpenedByName(ticket)}
+                    closedByName={closedInfoByTicketId[ticket.id]?.closedByName}
+                    closedAt={closedInfoByTicketId[ticket.id]?.closedAt}
                   />
                 ))}
               </div>
@@ -1224,6 +1322,9 @@ export default function Home() {
                         ? assigneeNameById.get(ticket.assigned_to)
                         : null
                     }
+                    openedByName={getOpenedByName(ticket)}
+                    closedByName={closedInfoByTicketId[ticket.id]?.closedByName}
+                    closedAt={closedInfoByTicketId[ticket.id]?.closedAt}
                   />
                 ))}
               </div>
@@ -1254,6 +1355,9 @@ export default function Home() {
                         ? assigneeNameById.get(ticket.assigned_to)
                         : null
                     }
+                    openedByName={getOpenedByName(ticket)}
+                    closedByName={closedInfoByTicketId[ticket.id]?.closedByName}
+                    closedAt={closedInfoByTicketId[ticket.id]?.closedAt}
                   />
                 ))}
               </div>
@@ -1350,7 +1454,14 @@ export default function Home() {
   );
 }
 
-function TicketCard({ ticket, showAssignee, assigneeEmail }: any) {
+function TicketCard({
+  ticket,
+  showAssignee,
+  assigneeEmail,
+  openedByName,
+  closedByName,
+  closedAt,
+}: any) {
   return (
     <div
       className="cursor-pointer rounded border bg-white p-3 shadow-sm hover:bg-gray-50"
@@ -1366,6 +1477,19 @@ function TicketCard({ ticket, showAssignee, assigneeEmail }: any) {
         <p className="mt-1 text-xs text-gray-600">
           Assegnato a: {assigneeEmail || "Nessuno"}
         </p>
+      )}
+
+      <p className="mt-1 text-xs text-gray-600">Aperto da: {openedByName || "N/D"}</p>
+      <p className="mt-1 text-xs text-gray-600">
+        Aperto il: {ticket.created_at ? new Date(ticket.created_at).toLocaleString("it-IT") : "N/D"}
+      </p>
+      {ticket.status === "closed" && (
+        <>
+          <p className="mt-1 text-xs text-gray-600">Chiuso da: {closedByName || "N/D"}</p>
+          <p className="mt-1 text-xs text-gray-600">
+            Chiuso il: {closedAt ? new Date(closedAt).toLocaleString("it-IT") : "N/D"}
+          </p>
+        </>
       )}
 
       <div className="mt-2 flex items-center justify-between">
