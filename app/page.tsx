@@ -38,6 +38,10 @@ export default function Home() {
   const [operatorPerformance, setOperatorPerformance] = useState<any[]>([]);
   const [kpiLoading, setKpiLoading] = useState(false);
   const [currentProfile, setCurrentProfile] = useState<any>(null);
+  const [autoReplyTemplate, setAutoReplyTemplate] = useState("");
+  const [autoReplyEnabled, setAutoReplyEnabled] = useState(true);
+  const [autoReplyTemplateLoading, setAutoReplyTemplateLoading] = useState(false);
+  const [autoReplyTemplateSaving, setAutoReplyTemplateSaving] = useState(false);
   const notificationRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -75,6 +79,7 @@ export default function Home() {
   useEffect(() => {
     if (role === "team_leader") {
       loadOperatorPerformance();
+      loadAutoReplyTemplate();
     } else {
       setOperatorPerformance([]);
     }
@@ -222,20 +227,27 @@ export default function Home() {
   async function createTicket() {
     if (!user) return;
 
-    const { error } = await supabase.from("tickets").insert([
-      {
-        title,
-        description,
-        category,
-        priority,
-        created_by: user.id,
-        requester_id: user.id,
-      },
-    ]);
+    const { data, error } = await supabase
+      .from("tickets")
+      .insert([
+        {
+          title,
+          description,
+          category,
+          priority,
+          created_by: user.id,
+          requester_id: user.id,
+        },
+      ])
+      .select("id, created_at, requester_id")
+      .single();
 
     if (error) {
       alert(error.message);
     } else {
+      if (data?.id && data?.requester_id && data?.created_at) {
+        await sendAutoReplyIfNeeded(data.id, data.requester_id, data.created_at);
+      }
       setTitle("");
       setDescription("");
       loadTickets(user);
@@ -358,6 +370,112 @@ export default function Home() {
   function formatHours(hours: number | null) {
     if (hours === null || Number.isNaN(hours)) return "-";
     return `${hours.toFixed(1)}h`;
+  }
+
+  function getEuropeRomeParts(date: Date) {
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Europe/Rome",
+      weekday: "short",
+      hour: "2-digit",
+      hour12: false,
+    });
+    const parts = formatter.formatToParts(date);
+    const weekday = parts.find((part) => part.type === "weekday")?.value?.toLowerCase() ?? "";
+    const hour = Number(parts.find((part) => part.type === "hour")?.value ?? "0");
+    return { weekday, hour };
+  }
+
+  function shouldSendAutoReplyForDate(date: Date) {
+    const { weekday, hour } = getEuropeRomeParts(date);
+    const isWeekendWindow =
+      weekday === "sat" ||
+      weekday === "sun" ||
+      (weekday === "fri" && hour >= 18) ||
+      (weekday === "mon" && hour < 9);
+
+    const isWeekdayNightWindow =
+      ["mon", "tue", "wed", "thu", "fri"].includes(weekday) &&
+      (hour < 9 || hour >= 18);
+
+    return isWeekendWindow || isWeekdayNightWindow;
+  }
+
+  async function loadAutoReplyTemplate() {
+    setAutoReplyTemplateLoading(true);
+    const { data, error } = await supabase
+      .from("ticket_auto_reply_templates")
+      .select("template_body, is_enabled")
+      .eq("id", 1)
+      .single();
+
+    if (!error && data) {
+      setAutoReplyTemplate(data.template_body ?? "");
+      setAutoReplyEnabled(Boolean(data.is_enabled));
+    }
+
+    setAutoReplyTemplateLoading(false);
+  }
+
+  async function saveAutoReplyTemplate() {
+    if (role !== "team_leader") return;
+
+    setAutoReplyTemplateSaving(true);
+    const { error } = await supabase
+      .from("ticket_auto_reply_templates")
+      .upsert(
+        {
+          id: 1,
+          template_body: autoReplyTemplate.trim(),
+          is_enabled: autoReplyEnabled,
+          updated_by: user?.id ?? null,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "id" }
+      );
+
+    setAutoReplyTemplateSaving(false);
+    if (error) {
+      alert(error.message);
+      return;
+    }
+    alert("Template salvato");
+  }
+
+  async function sendAutoReplyIfNeeded(ticketId: string, requesterId: string, createdAt: string) {
+    const createdDate = new Date(createdAt);
+    if (Number.isNaN(createdDate.getTime())) return;
+    if (!shouldSendAutoReplyForDate(createdDate)) return;
+
+    const { data: templateData, error: templateError } = await supabase
+      .from("ticket_auto_reply_templates")
+      .select("template_body, is_enabled")
+      .eq("id", 1)
+      .single();
+
+    if (templateError || !templateData?.is_enabled) return;
+
+    const message = String(templateData.template_body ?? "").trim();
+    if (!message) return;
+
+    await supabase.from("notifications").insert([
+      {
+        user_id: requesterId,
+        ticket_id: ticketId,
+        type: "info",
+        message,
+      },
+    ]);
+
+    if (user?.id) {
+      await supabase.from("ticket_events").insert([
+        {
+          ticket_id: ticketId,
+          user_id: user.id,
+          type: "auto_reply",
+          description: "Inviata risposta automatica fuori orario",
+        },
+      ]);
+    }
   }
 
   async function loadOperatorPerformance() {
@@ -830,6 +948,48 @@ export default function Home() {
                     </tbody>
                   </table>
                 </div>
+              )}
+            </div>
+          )}
+
+          {role === "team_leader" && (
+            <div className="mb-6 rounded border bg-gray-50 p-4">
+              <h2 className="mb-2 text-lg font-bold text-black">
+                Template risposta automatica fuori orario
+              </h2>
+              <p className="mb-3 text-xs text-gray-600">
+                Inviata per ticket aperti tra le 18:00 e le 09:00 nei feriali, e da venerdi 18:00 a lunedi 09:00.
+              </p>
+
+              {autoReplyTemplateLoading ? (
+                <p className="text-sm text-gray-600">Caricamento template...</p>
+              ) : (
+                <>
+                  <label className="mb-2 flex items-center gap-2 text-sm text-black">
+                    <input
+                      type="checkbox"
+                      checked={autoReplyEnabled}
+                      onChange={(e) => setAutoReplyEnabled(e.target.checked)}
+                    />
+                    Attiva risposta automatica
+                  </label>
+
+                  <textarea
+                    className="mb-3 w-full rounded border p-2 text-black"
+                    rows={4}
+                    value={autoReplyTemplate}
+                    onChange={(e) => setAutoReplyTemplate(e.target.value)}
+                    placeholder="Inserisci il template della risposta automatica..."
+                  />
+
+                  <button
+                    onClick={saveAutoReplyTemplate}
+                    disabled={autoReplyTemplateSaving}
+                    className="rounded bg-black px-4 py-2 text-white disabled:opacity-60"
+                  >
+                    {autoReplyTemplateSaving ? "Salvataggio..." : "Salva template"}
+                  </button>
+                </>
               )}
             </div>
           )}
