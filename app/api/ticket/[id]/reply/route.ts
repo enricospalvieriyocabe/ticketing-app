@@ -93,6 +93,12 @@ export async function POST(
     );
   }
 
+  await supabaseAdmin.from("ticket_comments").insert({
+    ticket_id: ticketId,
+    user_id: actorUserId,
+    body: `📤 Risposta cliente (in coda)\n\n${replyBody}`,
+  });
+
   await supabaseAdmin.from("ticket_events").insert({
     ticket_id: ticketId,
     user_id: actorUserId,
