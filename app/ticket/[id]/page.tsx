@@ -27,7 +27,6 @@ export default function TicketPage() {
 
   const [events, setEvents] = useState<any[]>([]);
   const [handoffNote, setHandoffNote] = useState("");
-  const [showOriginalMessage, setShowOriginalMessage] = useState(false);
 
   useEffect(() => {
     loadUser();
@@ -437,30 +436,15 @@ export default function TicketPage() {
           <div className="col-span-2">
             <div className="rounded border bg-white p-4">
               <h2 className="mb-2 text-lg font-bold text-black">Richiesta</h2>
-              <p className="whitespace-pre-wrap break-words text-black [overflow-wrap:anywhere]">
-                {parsedContent.summary}
-              </p>
+              <pre className="max-h-[34rem] overflow-auto whitespace-pre-wrap break-words text-sm text-black [overflow-wrap:anywhere]">
+                {parsedContent.rawBody || parsedContent.summary}
+              </pre>
               {(parsedContent.from || parsedContent.messageId) && (
                 <p className="mt-3 break-words text-xs text-gray-600 [overflow-wrap:anywhere]">
                   {parsedContent.from ? `Mittente: ${parsedContent.from}` : ""}
                   {parsedContent.from && parsedContent.messageId ? " - " : ""}
                   {parsedContent.messageId ? `Message-ID: ${parsedContent.messageId}` : ""}
                 </p>
-              )}
-              {parsedContent.channel === "email" && (
-                <div className="mt-3">
-                  <button
-                    onClick={() => setShowOriginalMessage(!showOriginalMessage)}
-                    className="rounded border border-gray-300 px-3 py-1 text-xs text-gray-700"
-                  >
-                    {showOriginalMessage ? "Nascondi messaggio originale" : "Mostra messaggio originale"}
-                  </button>
-                  {showOriginalMessage && (
-                    <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap rounded bg-gray-50 p-3 text-xs text-gray-700">
-                      {parsedContent.rawBody || parsedContent.summary}
-                    </pre>
-                  )}
-                </div>
               )}
             </div>
   
