@@ -51,7 +51,8 @@ export default function Home() {
   const [autoReplyTemplateLoading, setAutoReplyTemplateLoading] = useState(false);
   const [autoReplyTemplateSaving, setAutoReplyTemplateSaving] = useState(false);
   const [showTemplateManager, setShowTemplateManager] = useState(false);
-  const [showSlaManager, setShowSlaManager] = useState(true);
+  const [showSlaManager, setShowSlaManager] = useState(false);
+  const [showOperatorPerformance, setShowOperatorPerformance] = useState(false);
   const [slaPolicies, setSlaPolicies] = useState<any[]>([]);
   const [slaPoliciesLoading, setSlaPoliciesLoading] = useState(false);
   const [slaPoliciesSaving, setSlaPoliciesSaving] = useState(false);
@@ -1273,6 +1274,14 @@ export default function Home() {
             </button>
             {role === "team_leader" && (
               <button
+                onClick={() => setShowOperatorPerformance(!showOperatorPerformance)}
+                className="ml-3 rounded border border-black bg-white px-4 py-2 text-black"
+              >
+                {showOperatorPerformance ? "Nascondi performance" : "Performance"}
+              </button>
+            )}
+            {role === "team_leader" && (
+              <button
                 onClick={() => setShowTemplateManager(!showTemplateManager)}
                 className="ml-3 rounded border border-black bg-white px-4 py-2 text-black"
               >
@@ -1284,7 +1293,7 @@ export default function Home() {
                 onClick={() => setShowSlaManager(!showSlaManager)}
                 className="ml-3 rounded border border-black bg-white px-4 py-2 text-black"
               >
-                {showSlaManager ? "Nascondi SLA" : "Mostra SLA"}
+                {showSlaManager ? "Nascondi SLA" : "SLA"}
               </button>
             )}
           </div>
@@ -1675,7 +1684,7 @@ export default function Home() {
             </div>
           )}
 
-          {role === "team_leader" && (
+          {role === "team_leader" && showOperatorPerformance && (
             <div className="mb-6 rounded border bg-gray-50 p-4">
               <h2 className="mb-3 text-lg font-bold text-black">
                 Dashboard performance operatori
