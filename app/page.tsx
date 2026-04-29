@@ -1856,9 +1856,9 @@ export default function Home() {
             </div>
           )}
 
-          <div className="mb-6 flex gap-4">
+          <div className="mb-6 flex flex-wrap gap-4">
             <select
-              className="rounded border p-2 text-black"
+              className="min-w-0 rounded border p-2 text-black md:w-52"
               value={filterCategory}
               onChange={(e) => setFilterCategory(e.target.value)}
             >
@@ -1871,7 +1871,7 @@ export default function Home() {
             </select>
 
             <select
-              className="rounded border p-2 text-black"
+              className="min-w-0 rounded border p-2 text-black md:w-52"
               value={filterPriority}
               onChange={(e) => setFilterPriority(e.target.value)}
             >
@@ -1882,7 +1882,7 @@ export default function Home() {
               <option value="urgent">Urgente</option>
             </select>
             <select
-              className="rounded border p-2 text-black"
+              className="min-w-0 w-full rounded border p-2 text-black md:w-80"
               value={filterCaseType}
               onChange={(e) => setFilterCaseType(e.target.value)}
             >
