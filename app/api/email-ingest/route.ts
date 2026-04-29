@@ -1,5 +1,6 @@
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { inferZalandoClassification } from "@/lib/ticket-classification";
+import { extractOrderReference } from "@/lib/order-reference";
 import { formatEmailDescription } from "@/lib/ticket-content";
 
 type EmailIngestPayload = {
@@ -118,6 +119,7 @@ export async function POST(req: Request) {
 
   const titlePrefix = fromName ? `${fromName} <${fromEmail}>` : fromEmail;
   const classification = inferZalandoClassification(subject, description);
+  const orderReference = extractOrderReference(subject, description);
   const title = `[Email] ${subject}`;
   const cleanedDescription = cleanEmailBody(description) || "Email senza contenuto testuale.";
   const structuredDescription = formatEmailDescription({
@@ -127,6 +129,7 @@ export async function POST(req: Request) {
     messageId,
     threadId,
     receivedAt,
+    orderReference,
   });
 
   const { data: createdTicket, error: ticketError } = await supabaseAdmin
@@ -139,6 +142,7 @@ export async function POST(req: Request) {
       case_type: classification.caseType,
       case_tags: classification.caseTags,
       source_channel: "email",
+      order_reference: orderReference,
       status: "open",
       created_by: systemUserId,
       requester_id: systemUserId,

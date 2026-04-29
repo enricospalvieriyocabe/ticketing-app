@@ -9,6 +9,7 @@ type ParsedTicketContent = {
   from: string | null;
   messageId: string | null;
   threadId: string | null;
+  orderReference: string | null;
 };
 
 const STRUCTURED_HEADER_START = "[ticket-input]";
@@ -94,6 +95,7 @@ export function formatEmailDescription(input: {
   messageId: string;
   threadId?: string | null;
   receivedAt?: string | null;
+  orderReference?: string | null;
 }) {
   return [
     STRUCTURED_HEADER_START,
@@ -102,6 +104,7 @@ export function formatEmailDescription(input: {
     `message_id=${input.messageId}`,
     `thread_id=${input.threadId ?? ""}`,
     `received_at=${input.receivedAt ?? ""}`,
+    `order_reference=${input.orderReference ?? ""}`,
     STRUCTURED_HEADER_END,
     "",
     input.cleanBody,
@@ -131,6 +134,7 @@ export function parseTicketContent(ticket: { title?: string | null; description?
       from: structured.metadata.from || null,
       messageId: structured.metadata.message_id || null,
       threadId: structured.metadata.thread_id || null,
+      orderReference: structured.metadata.order_reference || null,
     };
   }
 
@@ -146,6 +150,7 @@ export function parseTicketContent(ticket: { title?: string | null; description?
       from: legacy.from,
       messageId: legacy.messageId,
       threadId: null,
+      orderReference: null,
     };
   }
 
@@ -159,5 +164,6 @@ export function parseTicketContent(ticket: { title?: string | null; description?
     from: null,
     messageId: null,
     threadId: null,
+    orderReference: null,
   };
 }

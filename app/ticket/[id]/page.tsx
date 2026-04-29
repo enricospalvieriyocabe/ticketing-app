@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "../../../lib/supabase";
 import { CASE_TYPE_OPTIONS, getCaseTypeLabel } from "@/lib/ticket-classification";
+import { extractOrderReference } from "@/lib/order-reference";
 import { parseTicketContent } from "@/lib/ticket-content";
 
 export default function TicketPage() {
@@ -353,6 +354,14 @@ export default function TicketPage() {
     loadTicket();
   }
 
+  async function saveOrderReference(rawValue: string) {
+    if (!ticket) return;
+    const nextValue = rawValue.trim() || null;
+    const currentValue = ticket.order_reference ?? null;
+    if (nextValue === currentValue) return;
+    await updateTicketField("order_reference", nextValue);
+  }
+
   async function startTicket() {
     if (!user) return;
   
@@ -419,6 +428,11 @@ export default function TicketPage() {
 
   if (!ticket) return <p className="p-6">Caricamento...</p>;
   const parsedContent = parseTicketContent(ticket);
+  const orderReferenceDefault =
+    ticket.order_reference ??
+    parsedContent.orderReference ??
+    extractOrderReference(ticket.title ?? "", ticket.description ?? "") ??
+    "";
 
   return (
     <main className="min-h-screen bg-gray-100 p-8">
@@ -614,6 +628,23 @@ export default function TicketPage() {
                   Tag: {ticket.case_tags.join(", ")}
                 </p>
               )}
+
+              <label className="mt-3 block">
+                Riferimento ordine:
+                <input
+                  key={`${ticket.id}-${ticket.order_reference ?? ""}`}
+                  className="mt-1 w-full rounded border p-2 text-black"
+                  defaultValue={orderReferenceDefault}
+                  onBlur={(e) => saveOrderReference(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      saveOrderReference((e.target as HTMLInputElement).value);
+                    }
+                  }}
+                  placeholder="Es. 11003151416998"
+                />
+              </label>
   
               <label className="block">
                 Categoria:

@@ -2175,6 +2175,11 @@ function TicketCard({
       {parsed.from && (
         <p className="mt-1 truncate text-xs text-gray-600">Mittente: {parsed.from}</p>
       )}
+      {ticket.order_reference && (
+        <p className="mt-1 truncate text-xs text-gray-600">
+          Ordine: {ticket.order_reference}
+        </p>
+      )}
 
       {showAssignee && (
         <p className="mt-1 text-xs text-gray-600">
