@@ -4,6 +4,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "../../../lib/supabase";
+import { CASE_TYPE_OPTIONS, getCaseTypeLabel } from "@/lib/ticket-classification";
 import { parseTicketContent } from "@/lib/ticket-content";
 
 export default function TicketPage() {
@@ -344,7 +345,7 @@ export default function TicketPage() {
     loadTicket();
   }
 
-  async function updateTicketField(field: string, value: string) {
+  async function updateTicketField(field: string, value: string | null) {
     await supabase
       .from("tickets")
       .update({ [field]: value })
@@ -599,6 +600,36 @@ export default function TicketPage() {
   
             <div className="rounded border bg-gray-50 p-3 text-sm text-gray-700">
               <h2 className="mb-2 font-bold text-black">Dettagli</h2>
+
+              <label className="block">
+                Casistica:
+                <select
+                  className="mt-1 w-full rounded border p-2 text-black"
+                  value={ticket.case_type || ""}
+                  onChange={(e) =>
+                    updateTicketField(
+                      "case_type",
+                      e.target.value ? e.target.value : null
+                    )
+                  }
+                >
+                  <option value="">Non classificato</option>
+                  {CASE_TYPE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <span className="mt-2 inline-block rounded bg-violet-100 px-2 py-1 text-xs font-semibold text-violet-700">
+                  {getCaseTypeLabel(ticket.case_type)}
+                </span>
+              </label>
+
+              {Array.isArray(ticket.case_tags) && ticket.case_tags.length > 0 && (
+                <p className="mt-2 text-xs text-gray-600">
+                  Tag: {ticket.case_tags.join(", ")}
+                </p>
+              )}
   
               <label className="block">
                 Categoria:

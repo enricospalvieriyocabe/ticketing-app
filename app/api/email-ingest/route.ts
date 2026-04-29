@@ -1,4 +1,5 @@
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
+import { inferZalandoClassification } from "@/lib/ticket-classification";
 import { formatEmailDescription } from "@/lib/ticket-content";
 
 type EmailIngestPayload = {
@@ -10,11 +11,6 @@ type EmailIngestPayload = {
   textBody?: string | null;
   htmlBody?: string | null;
   receivedAt?: string | null;
-};
-
-type TicketTitleRule = {
-  title: string;
-  patterns: RegExp[];
 };
 
 function normalizeText(value: string | null | undefined): string | null {
@@ -47,50 +43,6 @@ function cleanEmailBody(value: string): string {
     .replace(/\s+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
-}
-
-function matchesAll(text: string, patterns: RegExp[]): boolean {
-  return patterns.every((pattern) => pattern.test(text));
-}
-
-function inferZalandoTicketTitle(subject: string, body: string): string | null {
-  const normalized = `${subject}\n${body}`.toLowerCase();
-
-  const rules: TicketTitleRule[] = [
-    {
-      // Caso 2: rimborso già emesso, niente risposta necessaria.
-      title: "Pacco non consegnato, rimborso emesso da Zalando",
-      patterns: [
-        /since the parcel was not damaged during transport/i,
-        /issued a refund/i,
-        /not necessary to reply to this e-mail/i,
-      ],
-    },
-    {
-      // Caso 1: cliente riceve pacco senza aver ordinato.
-      title: "Info consegna senza aver fatto ordini",
-      patterns: [/received a parcel without placing an order/i],
-    },
-    {
-      // Caso 3 e 4: pacco non ricevuto (EN/DE), anche con varianti "not shipped yet".
-      title: "Pacco non ricevuto",
-      patterns: [
-        /(has not received the parcel|nicht erhalten)/i,
-        /(start an investigation|tracking link|not shipped yet|bestellung)/i,
-      ],
-    },
-    {
-      // Fallback più generico su subject Zalando inquiry.
-      title: "Pacco non ricevuto",
-      patterns: [/(inquiry to order|anfrage zu der bestellung)/i],
-    },
-  ];
-
-  for (const rule of rules) {
-    if (matchesAll(normalized, rule.patterns)) return rule.title;
-  }
-
-  return null;
 }
 
 function getAuthToken(req: Request): string | null {
@@ -165,8 +117,8 @@ export async function POST(req: Request) {
   }
 
   const titlePrefix = fromName ? `${fromName} <${fromEmail}>` : fromEmail;
-  const inferredTitle = inferZalandoTicketTitle(subject, description);
-  const title = inferredTitle ? `[Email] ${inferredTitle}` : `[Email] ${subject}`;
+  const classification = inferZalandoClassification(subject, description);
+  const title = `[Email] ${subject}`;
   const cleanedDescription = cleanEmailBody(description) || "Email senza contenuto testuale.";
   const structuredDescription = formatEmailDescription({
     cleanBody: cleanedDescription,
@@ -184,6 +136,9 @@ export async function POST(req: Request) {
       description: structuredDescription,
       category: defaultCategory,
       priority: defaultPriority,
+      case_type: classification.caseType,
+      case_tags: classification.caseTags,
+      source_channel: "email",
       status: "open",
       created_by: systemUserId,
       requester_id: systemUserId,

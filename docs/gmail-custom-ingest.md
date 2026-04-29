@@ -18,6 +18,13 @@ create table if not exists public.email_ingest_log (
   received_at timestamptz,
   created_at timestamptz not null default now()
 );
+
+alter table public.tickets
+  add column if not exists case_type text,
+  add column if not exists case_tags text[] not null default '{}',
+  add column if not exists source_channel text;
+
+create index if not exists tickets_case_type_idx on public.tickets(case_type);
 ```
 
 ## 2) Variabili ambiente
@@ -102,3 +109,4 @@ function pushToTicketing() {
 
 - Il dedup avviene su `message_id` in `email_ingest_log`.
 - Se arriva due volte la stessa email, non crea ticket duplicati.
+- La classificazione viene salvata su `tickets.case_type` e `tickets.case_tags`.

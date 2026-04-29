@@ -3,6 +3,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { supabase } from "../lib/supabase";
+import { CASE_TYPE_OPTIONS, getCaseTypeLabel } from "@/lib/ticket-classification";
 import { parseTicketContent } from "@/lib/ticket-content";
 
 export default function Home() {
@@ -26,6 +27,7 @@ export default function Home() {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [filterCategory, setFilterCategory] = useState("all");
   const [filterPriority, setFilterPriority] = useState("all");
+  const [filterCaseType, setFilterCaseType] = useState("all");
   const [showNotifications, setShowNotifications] = useState(false);
   const [handoffNote, setHandoffNote] = useState("");
   const [kpiStartDate, setKpiStartDate] = useState(() => {
@@ -1088,8 +1090,15 @@ export default function Home() {
   
     const matchPriority =
       filterPriority === "all" || t.priority === filterPriority;
+
+    const matchCaseType =
+      filterCaseType === "all"
+        ? true
+        : filterCaseType === "unclassified"
+        ? !t.case_type
+        : t.case_type === filterCaseType;
   
-    return matchCategory && matchPriority;
+    return matchCategory && matchPriority && matchCaseType;
   });
   
   const assignedTickets = filteredTickets.filter(
@@ -1872,6 +1881,19 @@ export default function Home() {
               <option value="high">Alta</option>
               <option value="urgent">Urgente</option>
             </select>
+            <select
+              className="rounded border p-2 text-black"
+              value={filterCaseType}
+              onChange={(e) => setFilterCaseType(e.target.value)}
+            >
+              <option value="all">Tutte le casistiche</option>
+              <option value="unclassified">Non classificati</option>
+              {CASE_TYPE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
           </div>
 
         <div className="mb-6 space-y-6">
@@ -2175,6 +2197,11 @@ function TicketCard({
 
       <div className="mt-2 flex items-center justify-between">
         <div className="flex items-center gap-2">
+          {ticket.case_type && (
+            <span className="rounded bg-violet-100 px-2 py-1 text-xs font-semibold text-violet-700">
+              {getCaseTypeLabel(ticket.case_type)}
+            </span>
+          )}
           {parsed.channel === "email" && (
             <span className="rounded bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">
               email
