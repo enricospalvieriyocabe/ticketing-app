@@ -1,4 +1,4 @@
-import { supabaseAdmin } from "@/lib/supabase-admin";
+import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
 type EmailIngestPayload = {
   messageId?: string;
@@ -56,6 +56,7 @@ export async function POST(req: Request) {
   if (!providedToken || providedToken !== expectedToken) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const supabaseAdmin = getSupabaseAdmin();
 
   let payload: EmailIngestPayload;
   try {
