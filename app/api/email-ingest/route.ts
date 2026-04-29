@@ -1,4 +1,5 @@
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
+import { formatEmailDescription } from "@/lib/ticket-content";
 
 type EmailIngestPayload = {
   messageId?: string;
@@ -25,6 +26,21 @@ function stripHtml(html: string): string {
     .replace(/&nbsp;/gi, " ")
     .replace(/&amp;/gi, "&")
     .replace(/\s+/g, " ")
+    .trim();
+}
+
+function cleanEmailBody(value: string): string {
+  return value
+    .replace(/^-{2,}\s*Forwarded message\s*-{2,}$/gim, "")
+    .replace(/^From:\s.*$/gim, "")
+    .replace(/^Da:\s.*$/gim, "")
+    .replace(/^Date:\s.*$/gim, "")
+    .replace(/^Subject:\s.*$/gim, "")
+    .replace(/^To:\s.*$/gim, "")
+    .replace(/^Cc:\s.*$/gim, "")
+    .replace(/^A:\s.*$/gim, "")
+    .replace(/\s+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
 
@@ -101,12 +117,21 @@ export async function POST(req: Request) {
 
   const titlePrefix = fromName ? `${fromName} <${fromEmail}>` : fromEmail;
   const title = `[Email] ${subject}`;
+  const cleanedDescription = cleanEmailBody(description) || "Email senza contenuto testuale.";
+  const structuredDescription = formatEmailDescription({
+    cleanBody: cleanedDescription,
+    rawBody: description,
+    from: titlePrefix,
+    messageId,
+    threadId,
+    receivedAt,
+  });
 
   const { data: createdTicket, error: ticketError } = await supabaseAdmin
     .from("tickets")
     .insert({
       title,
-      description: `${description}\n\n---\nMittente: ${titlePrefix}\nMessage-ID: ${messageId}`,
+      description: structuredDescription,
       category: defaultCategory,
       priority: defaultPriority,
       status: "open",

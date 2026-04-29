@@ -1,7 +1,9 @@
 "use client";
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { useEffect, useState, useRef } from "react";
 import { supabase } from "../lib/supabase";
+import { parseTicketContent } from "@/lib/ticket-content";
 
 export default function Home() {
   const [user, setUser] = useState<any>(null);
@@ -114,8 +116,6 @@ export default function Home() {
       loadOperatorPerformance();
       loadAutoReplyTemplates();
       loadSlaPolicies();
-    } else {
-      setOperatorPerformance([]);
     }
   }, [role, tickets, assignableUsers, kpiStartDate, kpiEndDate, slaHours]);
 
@@ -1355,7 +1355,7 @@ export default function Home() {
               </h2>
 
               <p className="font-bold text-black">{selectedTicket.title}</p>
-              <p className="text-black mb-2">{selectedTicket.description}</p>
+              <p className="text-black mb-2">{parseTicketContent(selectedTicket).summary}</p>
 
               <p className="text-sm text-gray-600">
                 Stato: {selectedTicket.status}
@@ -1616,7 +1616,7 @@ export default function Home() {
                 </button>
               </div>
               <p className="mb-3 text-xs text-gray-600">
-                Qui puoi creare e aggiornare piu template. In automatico viene usato l'ultimo template attivo aggiornato.
+                Qui puoi creare e aggiornare piu template. In automatico viene usato l&apos;ultimo template attivo aggiornato.
               </p>
 
               {autoReplyTemplateLoading ? (
@@ -2138,16 +2138,21 @@ function TicketCard({
   closedByName,
   closedAt,
 }: any) {
+  const parsed = parseTicketContent(ticket);
   return (
     <div
       className="cursor-pointer rounded border bg-white p-3 shadow-sm hover:bg-gray-50"
       onClick={() => (window.location.href = `/ticket/${ticket.id}`)}
     >
-      <p className="font-bold text-black">{ticket.title}</p>
+      <p className="font-bold text-black">{parsed.cleanTitle}</p>
 
       <p className="truncate text-sm text-gray-600">
-        {ticket.description}
+        {parsed.preview}
       </p>
+
+      {parsed.from && (
+        <p className="mt-1 truncate text-xs text-gray-600">Mittente: {parsed.from}</p>
+      )}
 
       {showAssignee && (
         <p className="mt-1 text-xs text-gray-600">
@@ -2169,23 +2174,28 @@ function TicketCard({
       )}
 
       <div className="mt-2 flex items-center justify-between">
-        <span
-          className={`rounded px-2 py-1 text-xs font-bold ${
-            ticket.priority === "low"
-              ? "bg-green-100 text-green-700"
-              : ticket.priority === "medium"
-              ? "bg-blue-100 text-blue-700"
-              : ticket.priority === "high"
-              ? "bg-orange-100 text-orange-700"
-              : "bg-red-100 text-red-700"
-          }`}
-        >
-          {ticket.priority}
-        </span>
+        <div className="flex items-center gap-2">
+          {parsed.channel === "email" && (
+            <span className="rounded bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">
+              email
+            </span>
+          )}
+          <span
+            className={`rounded px-2 py-1 text-xs font-bold ${
+              ticket.priority === "low"
+                ? "bg-green-100 text-green-700"
+                : ticket.priority === "medium"
+                ? "bg-blue-100 text-blue-700"
+                : ticket.priority === "high"
+                ? "bg-orange-100 text-orange-700"
+                : "bg-red-100 text-red-700"
+            }`}
+          >
+            {ticket.priority}
+          </span>
+        </div>
 
-        <span className="text-xs text-gray-400">
-          {ticket.category}
-        </span>
+        <span className="text-xs text-gray-400">{ticket.category}</span>
       </div>
     </div>
   );
