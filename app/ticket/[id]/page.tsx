@@ -436,9 +436,11 @@ export default function TicketPage() {
           <div className="col-span-2">
             <div className="rounded border bg-white p-4">
               <h2 className="mb-2 text-lg font-bold text-black">Richiesta</h2>
-              <p className="whitespace-pre-wrap text-black">{parsedContent.summary}</p>
+              <p className="whitespace-pre-wrap break-words text-black [overflow-wrap:anywhere]">
+                {parsedContent.summary}
+              </p>
               {(parsedContent.from || parsedContent.messageId) && (
-                <p className="mt-3 text-xs text-gray-600">
+                <p className="mt-3 break-words text-xs text-gray-600 [overflow-wrap:anywhere]">
                   {parsedContent.from ? `Mittente: ${parsedContent.from}` : ""}
                   {parsedContent.from && parsedContent.messageId ? " - " : ""}
                   {parsedContent.messageId ? `Message-ID: ${parsedContent.messageId}` : ""}
