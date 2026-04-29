@@ -58,6 +58,34 @@ Body JSON minimo:
 }
 ```
 
+## 3.b Coda risposte email dal ticket (senza Google Cloud)
+
+Endpoint coda risposta:
+
+- `POST /api/ticket/:id/reply`
+- body:
+
+```json
+{
+  "body": "Testo risposta cliente",
+  "actorUserId": "uuid-utente-loggato"
+}
+```
+
+Endpoint per Apps Script (autenticati con `EMAIL_INGEST_TOKEN`):
+
+- `GET /api/email-replies/pending?limit=20`
+- `POST /api/email-replies/:id/status`
+
+Body status:
+
+```json
+{
+  "status": "sent",
+  "externalMessageId": "gmail-message-id"
+}
+```
+
 ## 4) Script Gmail (Apps Script)
 
 Puoi usare Apps Script con trigger ogni 1-5 minuti per leggere la label `to-ticket`.
@@ -105,6 +133,54 @@ function pushToTicketing() {
     thread.removeLabel(source);
   }
 }
+
+function processOutboundReplies() {
+  const BASE_URL = "https://TUO-DOMINIO";
+  const TOKEN = "EMAIL_INGEST_TOKEN";
+
+  const pendingRes = UrlFetchApp.fetch(BASE_URL + "/api/email-replies/pending?limit=20", {
+    method: "get",
+    headers: { Authorization: "Bearer " + TOKEN },
+    muteHttpExceptions: true,
+  });
+
+  if (pendingRes.getResponseCode() < 200 || pendingRes.getResponseCode() >= 300) return;
+  const payload = JSON.parse(pendingRes.getContentText() || "{}");
+  const items = payload.items || [];
+
+  for (const item of items) {
+    try {
+      const options = {};
+      if (item.thread_id) {
+        options["threadId"] = item.thread_id;
+      }
+
+      GmailApp.sendEmail(item.to_email, item.subject, item.body, options);
+
+      UrlFetchApp.fetch(BASE_URL + "/api/email-replies/" + item.id + "/status", {
+        method: "post",
+        contentType: "application/json",
+        headers: { Authorization: "Bearer " + TOKEN },
+        payload: JSON.stringify({
+          status: "sent",
+          externalMessageId: null,
+        }),
+        muteHttpExceptions: true,
+      });
+    } catch (err) {
+      UrlFetchApp.fetch(BASE_URL + "/api/email-replies/" + item.id + "/status", {
+        method: "post",
+        contentType: "application/json",
+        headers: { Authorization: "Bearer " + TOKEN },
+        payload: JSON.stringify({
+          status: "failed",
+          errorMessage: String(err),
+        }),
+        muteHttpExceptions: true,
+      });
+    }
+  }
+}
 ```
 
 ## Note
@@ -113,3 +189,4 @@ function pushToTicketing() {
 - Se arriva due volte la stessa email, non crea ticket duplicati.
 - La classificazione viene salvata su `tickets.case_type` e `tickets.case_tags`.
 - Se identificato, il riferimento ordine viene salvato in `tickets.order_reference`.
+- Le risposte dal ticket vengono messe in coda (`ticket_email_replies`) e inviate da Apps Script.

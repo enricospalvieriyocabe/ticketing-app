@@ -22,6 +22,8 @@ export default function TicketPage() {
 
   const [comments, setComments] = useState<any[]>([]);
   const [newComment, setNewComment] = useState("");
+  const [replyBody, setReplyBody] = useState("");
+  const [replySending, setReplySending] = useState(false);
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editingCommentBody, setEditingCommentBody] = useState("");
   const [commentAuthorsById, setCommentAuthorsById] = useState<Record<string, string>>({});
@@ -147,6 +149,33 @@ export default function TicketPage() {
     
       setNewComment("");
       loadComments();
+    }
+  }
+
+  async function sendReplyEmail() {
+    if (!user || !replyBody.trim()) return;
+    setReplySending(true);
+    try {
+      const response = await fetch(`/api/ticket/${id}/reply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          body: replyBody.trim(),
+          actorUserId: user.id,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        alert(result?.error || "Errore invio email");
+        return;
+      }
+      setReplyBody("");
+      await loadEvents();
+      alert("Risposta messa in coda. Sara inviata dallo script Gmail.");
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Errore invio email");
+    } finally {
+      setReplySending(false);
     }
   }
 
@@ -563,6 +592,27 @@ export default function TicketPage() {
                 className="mt-2 rounded bg-black px-4 py-2 text-white"
               >
                 Aggiungi commento
+              </button>
+            </div>
+
+            <div className="mt-6 rounded border bg-gray-50 p-4">
+              <h2 className="mb-2 text-lg font-bold text-black">Risposta cliente (email)</h2>
+              <p className="mb-2 text-xs text-gray-600">
+                Questa azione invia una email al mittente e registra l&apos;invio nello storico attività.
+              </p>
+              <textarea
+                className="w-full rounded border p-2 text-black"
+                placeholder="Scrivi la risposta da inviare al cliente..."
+                value={replyBody}
+                onChange={(e) => setReplyBody(e.target.value)}
+                rows={6}
+              />
+              <button
+                onClick={sendReplyEmail}
+                disabled={replySending || !replyBody.trim()}
+                className="mt-2 rounded bg-black px-4 py-2 text-white disabled:opacity-60"
+              >
+                {replySending ? "Invio in corso..." : "Invia risposta email"}
               </button>
             </div>
           </div>
