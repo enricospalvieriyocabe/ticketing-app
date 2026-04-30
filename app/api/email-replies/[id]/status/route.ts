@@ -38,7 +38,7 @@ export async function POST(
 
   const { data: queueItem, error: queueError } = await supabaseAdmin
     .from("ticket_email_replies")
-    .select("id, ticket_id, requested_by, to_email")
+    .select("id, ticket_id, requested_by, to_email, body")
     .eq("id", id)
     .single();
 
@@ -74,6 +74,18 @@ export async function POST(
           : `Invio email fallito verso ${queueItem.to_email}: ${payload.errorMessage ?? "errore non specificato"}`,
     });
   }
+
+  const commentMarker = `[email-reply-id:${id}]`;
+  const commentStatusPrefix = status === "sent" ? "📤 Risposta cliente (inviata)" : "📤 Risposta cliente (errore invio)";
+  const commentStatusSuffix =
+    status === "sent" ? "" : `\n\nDettaglio errore: ${payload.errorMessage ?? "errore non specificato"}`;
+  const updatedCommentBody = `${commentMarker}\n${commentStatusPrefix}\n\n${queueItem.body}${commentStatusSuffix}`;
+
+  await supabaseAdmin
+    .from("ticket_comments")
+    .update({ body: updatedCommentBody })
+    .eq("ticket_id", queueItem.ticket_id)
+    .ilike("body", `%${commentMarker}%`);
 
   return Response.json({ ok: true });
 }

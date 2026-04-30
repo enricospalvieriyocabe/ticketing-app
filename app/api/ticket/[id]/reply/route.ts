@@ -93,10 +93,11 @@ export async function POST(
     );
   }
 
+  const commentMarker = `[email-reply-id:${queuedReply.id}]`;
   await supabaseAdmin.from("ticket_comments").insert({
     ticket_id: ticketId,
     user_id: actorUserId,
-    body: `📤 Risposta cliente (in coda)\n\n${replyBody}`,
+    body: `${commentMarker}\n📤 Risposta cliente (in coda)\n\n${replyBody}`,
   });
 
   await supabaseAdmin.from("ticket_events").insert({

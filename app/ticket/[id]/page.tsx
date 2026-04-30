@@ -170,6 +170,7 @@ export default function TicketPage() {
         return;
       }
       setReplyBody("");
+      await loadComments();
       await loadEvents();
       alert("Risposta messa in coda. Sara inviata dallo script Gmail.");
     } catch (error) {
@@ -256,6 +257,12 @@ export default function TicketPage() {
   
       return <span key={index}>{part}</span>;
     });
+  }
+
+  function cleanInternalCommentMarkers(text: string) {
+    return String(text ?? "")
+      .replace(/^\[email-reply-id:[^\]]+\]\s*/i, "")
+      .trim();
   }
 
   async function loadProfiles(ticket: any) {
@@ -497,6 +504,7 @@ export default function TicketPage() {
               <div className="space-y-2">
               {comments.map((c) => {
                 const isMine = c.user_id === user?.id;
+                const isSystemTrackedReply = /^\[email-reply-id:[^\]]+\]/i.test(String(c.body ?? ""));
                 const isEditing = editingCommentId === c.id;
                 const wasEdited =
                   c.updated_at &&
@@ -548,7 +556,7 @@ export default function TicketPage() {
                     ) : (
                       <>
                         <p className="text-black">
-                          {renderCommentWithMentions(c.body)}
+                          {renderCommentWithMentions(cleanInternalCommentMarkers(c.body))}
                         </p>
 
                         {wasEdited && (
@@ -557,7 +565,7 @@ export default function TicketPage() {
                           </p>
                         )}
 
-                        {isMine && (
+                        {isMine && !isSystemTrackedReply && (
                           <button
                             onClick={() => startEditComment(c)}
                             className="mt-2 rounded bg-gray-200 px-2 py-1 text-xs text-black"
