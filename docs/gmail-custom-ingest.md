@@ -38,6 +38,7 @@ Aggiungi queste variabili al progetto (locale e produzione):
 - `EMAIL_INGEST_SYSTEM_USER_ID`: UUID utente tecnico da usare in `created_by/requester_id`
 - `EMAIL_INGEST_DEFAULT_CATEGORY` (opzionale, default `general`)
 - `EMAIL_INGEST_DEFAULT_PRIORITY` (opzionale, default `medium`)
+- `EMAIL_INGEST_IGNORE_FROM` (opzionale): lista email separate da virgola da ignorare in ingest (es. mailbox interne)
 
 ## 3) Endpoint disponibile
 
@@ -116,6 +117,9 @@ function pushToTicketing() {
         receivedAt: message.getDate().toISOString(),
       };
 
+      // Evita di inviare i messaggi usciti dal vostro account (cartella Sent)
+      if (!message.isInInbox()) continue;
+
       const response = UrlFetchApp.fetch(API_URL, {
         method: "post",
         contentType: "application/json",
@@ -187,6 +191,8 @@ function processOutboundReplies() {
 
 - Il dedup avviene su `message_id` in `email_ingest_log`.
 - Se arriva due volte la stessa email, non crea ticket duplicati.
+- Se arriva una nuova email con lo stesso `thread_id`, viene aggiunta come commento al ticket esistente.
+- Puoi ignorare mittenti interni configurando `EMAIL_INGEST_IGNORE_FROM`.
 - La classificazione viene salvata su `tickets.case_type` e `tickets.case_tags`.
 - Se identificato, il riferimento ordine viene salvato in `tickets.order_reference`.
 - Le risposte dal ticket vengono messe in coda (`ticket_email_replies`) e inviate da Apps Script.

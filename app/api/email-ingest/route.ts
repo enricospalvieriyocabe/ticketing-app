@@ -14,6 +14,14 @@ type EmailIngestPayload = {
   receivedAt?: string | null;
 };
 
+function extractEmailAddress(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const angleMatch = value.match(/<([^>]+)>/);
+  if (angleMatch?.[1]) return angleMatch[1].trim().toLowerCase();
+  const plainMatch = value.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+  return plainMatch?.[0]?.toLowerCase() ?? null;
+}
+
 function normalizeText(value: string | null | undefined): string | null {
   if (!value) return null;
   const trimmed = value.trim();
@@ -59,6 +67,10 @@ export async function POST(req: Request) {
   const systemUserId = process.env.EMAIL_INGEST_SYSTEM_USER_ID;
   const defaultCategory = process.env.EMAIL_INGEST_DEFAULT_CATEGORY ?? "general";
   const defaultPriority = process.env.EMAIL_INGEST_DEFAULT_PRIORITY ?? "medium";
+  const ignoredSenders = String(process.env.EMAIL_INGEST_IGNORE_FROM ?? "")
+    .split(",")
+    .map((entry) => entry.trim().toLowerCase())
+    .filter(Boolean);
 
   if (!expectedToken || !systemUserId) {
     return Response.json(
@@ -98,6 +110,15 @@ export async function POST(req: Request) {
   const fromName = normalizeText(payload.fromName);
   const threadId = normalizeText(payload.threadId);
   const receivedAt = normalizeText(payload.receivedAt);
+  const senderEmail = extractEmailAddress(fromEmail) ?? fromEmail.trim().toLowerCase();
+
+  if (ignoredSenders.length > 0 && ignoredSenders.includes(senderEmail)) {
+    return Response.json({
+      ok: true,
+      ignored: true,
+      reason: "ignored_sender",
+    });
+  }
 
   const { data: existingLog, error: existingLogError } = await supabaseAdmin
     .from("email_ingest_log")
@@ -131,6 +152,69 @@ export async function POST(req: Request) {
     receivedAt,
     orderReference,
   });
+  let ticketIdToUse: string | null = null;
+
+  if (threadId) {
+    const { data: existingThreadTicket, error: existingThreadTicketError } = await supabaseAdmin
+      .from("email_ingest_log")
+      .select("ticket_id")
+      .eq("thread_id", threadId)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    if (existingThreadTicketError) {
+      return Response.json({ error: existingThreadTicketError.message }, { status: 500 });
+    }
+
+    ticketIdToUse = existingThreadTicket?.ticket_id ?? null;
+  }
+
+  if (ticketIdToUse) {
+    const inboundCommentBody = [
+      `📩 Nuova email ricevuta da ${titlePrefix}`,
+      `Subject: ${subject}`,
+      `Message-ID: ${messageId}`,
+      cleanedDescription,
+    ].join("\n\n");
+
+    const { error: commentError } = await supabaseAdmin.from("ticket_comments").insert({
+      ticket_id: ticketIdToUse,
+      user_id: systemUserId,
+      body: inboundCommentBody,
+    });
+
+    if (commentError) {
+      return Response.json({ error: commentError.message }, { status: 500 });
+    }
+
+    const { error: eventError } = await supabaseAdmin.from("ticket_events").insert({
+      ticket_id: ticketIdToUse,
+      user_id: systemUserId,
+      type: "inbound_email",
+      description: `Nuova email ricevuta nel thread ${threadId ?? "n/a"} (${messageId})`,
+    });
+
+    if (eventError) {
+      return Response.json({ error: eventError.message }, { status: 500 });
+    }
+
+    const { error: logError } = await supabaseAdmin.from("email_ingest_log").insert({
+      message_id: messageId,
+      thread_id: threadId,
+      ticket_id: ticketIdToUse,
+      from_email: fromEmail,
+      from_name: fromName,
+      subject,
+      received_at: receivedAt,
+    });
+
+    if (logError) {
+      return Response.json({ error: logError.message }, { status: 500 });
+    }
+
+    return Response.json({ ok: true, duplicate: false, ticketId: ticketIdToUse, mergedIntoThread: true });
+  }
 
   const { data: createdTicket, error: ticketError } = await supabaseAdmin
     .from("tickets")
