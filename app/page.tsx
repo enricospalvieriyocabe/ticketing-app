@@ -6,6 +6,42 @@ import { supabase } from "../lib/supabase";
 import { CASE_TYPE_OPTIONS, getCaseTypeLabel } from "@/lib/ticket-classification";
 import { parseTicketContent } from "@/lib/ticket-content";
 
+function collapseEmailThreadDuplicates(items: any[]): any[] {
+  const byThreadId = new Map<string, any>();
+  const withoutThread: any[] = [];
+
+  for (const ticket of items) {
+    const parsed = parseTicketContent(ticket);
+    const threadId = parsed.threadId?.trim();
+
+    if (parsed.channel === "email" && threadId) {
+      const existing = byThreadId.get(threadId);
+      if (!existing) {
+        byThreadId.set(threadId, ticket);
+        continue;
+      }
+
+      const existingCreatedAt = new Date(existing.created_at ?? 0).getTime();
+      const currentCreatedAt = new Date(ticket.created_at ?? 0).getTime();
+
+      // Mantiene il ticket email più vecchio del thread, che è quello canonico usato dall'ingest.
+      if (currentCreatedAt < existingCreatedAt) {
+        byThreadId.set(threadId, ticket);
+      }
+      continue;
+    }
+
+    withoutThread.push(ticket);
+  }
+
+  const merged = [...withoutThread, ...Array.from(byThreadId.values())];
+  return merged.sort((a, b) => {
+    const aCreatedAt = new Date(a.created_at ?? 0).getTime();
+    const bCreatedAt = new Date(b.created_at ?? 0).getTime();
+    return bCreatedAt - aCreatedAt;
+  });
+}
+
 export default function Home() {
   const [user, setUser] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -260,7 +296,7 @@ export default function Home() {
     const { data, error } = await query.order("created_at", { ascending: false });
 
     if (error) alert(error.message);
-    else setTickets(data ?? []);
+    else setTickets(collapseEmailThreadDuplicates(data ?? []));
   }
 
   async function loadNotifications(currentUser: any) {
