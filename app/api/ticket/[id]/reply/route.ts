@@ -39,7 +39,7 @@ export async function POST(
 
   const { data: ticket, error: ticketError } = await supabaseAdmin
     .from("tickets")
-    .select("id, title")
+    .select("id, title, assigned_to, status")
     .eq("id", ticketId)
     .single();
 
@@ -72,6 +72,25 @@ export async function POST(
 
   const actorUserId = String(payload.actorUserId ?? "").trim() || systemUserId;
 
+  if (!ticket.assigned_to) {
+    const autoAssignStatus = ticket.status === "open" ? "assigned" : ticket.status;
+    await supabaseAdmin
+      .from("tickets")
+      .update({
+        assigned_to: actorUserId,
+        status: autoAssignStatus,
+      })
+      .eq("id", ticketId)
+      .is("assigned_to", null);
+
+    await supabaseAdmin.from("ticket_events").insert({
+      ticket_id: ticketId,
+      user_id: actorUserId,
+      type: "auto_assigned",
+      description: "Assegnazione automatica al primo invio risposta email",
+    });
+  }
+
   const { data: queuedReply, error: queueError } = await supabaseAdmin
     .from("ticket_email_replies")
     .insert({
@@ -97,7 +116,7 @@ export async function POST(
   await supabaseAdmin.from("ticket_comments").insert({
     ticket_id: ticketId,
     user_id: actorUserId,
-    body: `${commentMarker}\n📤 Risposta cliente (in coda)\n\n${replyBody}`,
+    body: `${commentMarker}\n${replyBody}`,
   });
 
   await supabaseAdmin.from("ticket_events").insert({

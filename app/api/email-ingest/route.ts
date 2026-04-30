@@ -54,6 +54,16 @@ function cleanEmailBody(value: string): string {
     .trim();
 }
 
+function normalizeSubjectForThreadMatch(value: string): string {
+  let subject = value.trim().toLowerCase();
+  for (let i = 0; i < 6; i += 1) {
+    const next = subject.replace(/^(re|r|fw|fwd)\s*:\s*/i, "").trim();
+    if (next === subject) break;
+    subject = next;
+  }
+  return subject.replace(/\s+/g, " ");
+}
+
 function getAuthToken(req: Request): string | null {
   const auth = req.headers.get("authorization");
   if (auth?.toLowerCase().startsWith("bearer ")) {
@@ -111,6 +121,7 @@ export async function POST(req: Request) {
   const threadId = normalizeText(payload.threadId);
   const receivedAt = normalizeText(payload.receivedAt);
   const senderEmail = extractEmailAddress(fromEmail) ?? fromEmail.trim().toLowerCase();
+  const normalizedSubject = normalizeSubjectForThreadMatch(subject);
 
   if (ignoredSenders.length > 0 && ignoredSenders.includes(senderEmail)) {
     return Response.json({
@@ -170,6 +181,26 @@ export async function POST(req: Request) {
     ticketIdToUse = existingThreadTicket?.ticket_id ?? null;
   }
 
+  if (!ticketIdToUse) {
+    const twoWeeksAgoIso = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+    const { data: fallbackLogs, error: fallbackLogsError } = await supabaseAdmin
+      .from("email_ingest_log")
+      .select("ticket_id, subject")
+      .ilike("from_email", `%${senderEmail}%`)
+      .gte("created_at", twoWeeksAgoIso)
+      .order("created_at", { ascending: false })
+      .limit(50);
+
+    if (fallbackLogsError) {
+      return Response.json({ error: fallbackLogsError.message }, { status: 500 });
+    }
+
+    const fallbackMatch = (fallbackLogs ?? []).find(
+      (row) => normalizeSubjectForThreadMatch(String(row.subject ?? "")) === normalizedSubject
+    );
+    ticketIdToUse = fallbackMatch?.ticket_id ?? null;
+  }
+
   if (ticketIdToUse) {
     const inboundCommentBody = [
       `📩 Nuova email ricevuta da ${titlePrefix}`,
@@ -192,7 +223,7 @@ export async function POST(req: Request) {
       ticket_id: ticketIdToUse,
       user_id: systemUserId,
       type: "inbound_email",
-      description: `Nuova email ricevuta nel thread ${threadId ?? "n/a"} (${messageId})`,
+      description: `Nuova email ricevuta (${threadId ? `thread ${threadId}` : "match subject+sender"}) (${messageId})`,
     });
 
     if (eventError) {

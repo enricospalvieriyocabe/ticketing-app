@@ -75,17 +75,5 @@ export async function POST(
     });
   }
 
-  const commentMarker = `[email-reply-id:${id}]`;
-  const commentStatusPrefix = status === "sent" ? "📤 Risposta cliente (inviata)" : "📤 Risposta cliente (errore invio)";
-  const commentStatusSuffix =
-    status === "sent" ? "" : `\n\nDettaglio errore: ${payload.errorMessage ?? "errore non specificato"}`;
-  const updatedCommentBody = `${commentMarker}\n${commentStatusPrefix}\n\n${queueItem.body}${commentStatusSuffix}`;
-
-  await supabaseAdmin
-    .from("ticket_comments")
-    .update({ body: updatedCommentBody })
-    .eq("ticket_id", queueItem.ticket_id)
-    .ilike("body", `%${commentMarker}%`);
-
   return Response.json({ ok: true });
 }

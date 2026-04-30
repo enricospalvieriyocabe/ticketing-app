@@ -27,6 +27,9 @@ export default function TicketPage() {
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editingCommentBody, setEditingCommentBody] = useState("");
   const [commentAuthorsById, setCommentAuthorsById] = useState<Record<string, string>>({});
+  const [replyStatusByQueueId, setReplyStatusByQueueId] = useState<
+    Record<string, { status: string; errorMessage: string | null }>
+  >({});
 
   const [events, setEvents] = useState<any[]>([]);
   const [handoffNote, setHandoffNote] = useState("");
@@ -87,6 +90,33 @@ export default function TicketPage() {
     const loadedComments = data ?? [];
     setComments(loadedComments);
 
+    const trackedReplyIds = Array.from(
+      new Set(
+        loadedComments
+          .map((comment: any) => extractEmailReplyIdFromComment(comment.body))
+          .filter((queueId: string | null): queueId is string => Boolean(queueId))
+      )
+    );
+
+    if (trackedReplyIds.length > 0) {
+      const { data: replyRows } = await supabase
+        .from("ticket_email_replies")
+        .select("id, status, error_message")
+        .eq("ticket_id", id)
+        .in("id", trackedReplyIds.map((item) => Number(item)));
+
+      const nextMap: Record<string, { status: string; errorMessage: string | null }> = {};
+      for (const row of replyRows ?? []) {
+        nextMap[String(row.id)] = {
+          status: String(row.status ?? "pending"),
+          errorMessage: row.error_message ? String(row.error_message) : null,
+        };
+      }
+      setReplyStatusByQueueId(nextMap);
+    } else {
+      setReplyStatusByQueueId({});
+    }
+
     const authorIds = Array.from(
       new Set(
         loadedComments
@@ -130,6 +160,7 @@ export default function TicketPage() {
     if (error) {
       alert(error.message);
     } else {
+      await ensureTicketAssignedToCurrentUser("primo commento");
       const mentionedEmails = extractMentionedEmails(newComment);
     
       for (const email of mentionedEmails) {
@@ -156,6 +187,7 @@ export default function TicketPage() {
     if (!user || !replyBody.trim()) return;
     setReplySending(true);
     try {
+      await ensureTicketAssignedToCurrentUser("invio risposta email");
       const response = await fetch(`/api/ticket/${id}/reply`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -263,6 +295,49 @@ export default function TicketPage() {
     return String(text ?? "")
       .replace(/^\[email-reply-id:[^\]]+\]\s*/i, "")
       .trim();
+  }
+
+  function extractEmailReplyIdFromComment(text: string) {
+    const match = String(text ?? "").match(/^\[email-reply-id:(\d+)\]/i);
+    return match?.[1] ?? null;
+  }
+
+  function getReplyStatusBadgeFromComment(text: string) {
+    const queueId = extractEmailReplyIdFromComment(text);
+    if (!queueId) return null;
+    const statusInfo = replyStatusByQueueId[queueId];
+    if (!statusInfo) return { label: "In coda", tone: "pending", detail: null };
+    if (statusInfo.status === "sent") return { label: "Inviata", tone: "sent", detail: null };
+    if (statusInfo.status === "failed") {
+      return { label: "Errore invio", tone: "failed", detail: statusInfo.errorMessage };
+    }
+    return { label: "In coda", tone: "pending", detail: null };
+  }
+
+  async function ensureTicketAssignedToCurrentUser(reason: string) {
+    if (!user || !ticket?.id || ticket.assigned_to) return;
+    const nextStatus = ticket.status === "open" ? "assigned" : ticket.status;
+    const { error } = await supabase
+      .from("tickets")
+      .update({
+        assigned_to: user.id,
+        status: nextStatus,
+      })
+      .eq("id", ticket.id)
+      .is("assigned_to", null);
+
+    if (error) return;
+
+    await supabase.from("ticket_events").insert([
+      {
+        ticket_id: ticket.id,
+        user_id: user.id,
+        type: "auto_assigned",
+        description: `Assegnazione automatica (${reason})`,
+      },
+    ]);
+    await loadTicket();
+    await loadEvents();
   }
 
   async function loadProfiles(ticket: any) {
@@ -505,9 +580,8 @@ export default function TicketPage() {
               {comments.map((c) => {
                 const isMine = c.user_id === user?.id;
                 const isSystemTrackedReply = /^\[email-reply-id:[^\]]+\]/i.test(String(c.body ?? ""));
-                const isOutboundReplyComment = /📤\s*Risposta cliente/i.test(
-                  cleanInternalCommentMarkers(String(c.body ?? ""))
-                );
+                const replyStatusBadge = getReplyStatusBadgeFromComment(String(c.body ?? ""));
+                const isOutboundReplyComment = Boolean(replyStatusBadge);
                 const isEditing = editingCommentId === c.id;
                 const wasEdited =
                   c.updated_at &&
@@ -528,9 +602,25 @@ export default function TicketPage() {
                           : commentAuthorsById[c.user_id] || "Altro utente"}
                       </p>
 
-                      <p className="text-xs text-gray-500">
-                        {new Date(c.created_at).toLocaleString("it-IT")}
-                      </p>
+                      <div className="flex items-center gap-2">
+                        {replyStatusBadge && (
+                          <span
+                            className={`rounded px-2 py-0.5 text-[11px] font-semibold ${
+                              replyStatusBadge.tone === "sent"
+                                ? "bg-green-100 text-green-700"
+                                : replyStatusBadge.tone === "failed"
+                                ? "bg-red-100 text-red-700"
+                                : "bg-amber-100 text-amber-700"
+                            }`}
+                            title={replyStatusBadge.detail ?? undefined}
+                          >
+                            {replyStatusBadge.label}
+                          </span>
+                        )}
+                        <p className="text-xs text-gray-500">
+                          {new Date(c.created_at).toLocaleString("it-IT")}
+                        </p>
+                      </div>
                     </div>
 
                     {isEditing ? (
