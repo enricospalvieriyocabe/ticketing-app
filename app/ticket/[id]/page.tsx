@@ -505,6 +505,9 @@ export default function TicketPage() {
               {comments.map((c) => {
                 const isMine = c.user_id === user?.id;
                 const isSystemTrackedReply = /^\[email-reply-id:[^\]]+\]/i.test(String(c.body ?? ""));
+                const isOutboundReplyComment = /📤\s*Risposta cliente/i.test(
+                  cleanInternalCommentMarkers(String(c.body ?? ""))
+                );
                 const isEditing = editingCommentId === c.id;
                 const wasEdited =
                   c.updated_at &&
@@ -565,7 +568,7 @@ export default function TicketPage() {
                           </p>
                         )}
 
-                        {isMine && !isSystemTrackedReply && (
+                        {isMine && !isSystemTrackedReply && !isOutboundReplyComment && (
                           <button
                             onClick={() => startEditComment(c)}
                             className="mt-2 rounded bg-gray-200 px-2 py-1 text-xs text-black"
