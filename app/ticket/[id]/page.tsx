@@ -27,6 +27,7 @@ export default function TicketPage() {
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editingCommentBody, setEditingCommentBody] = useState("");
   const [commentAuthorsById, setCommentAuthorsById] = useState<Record<string, string>>({});
+  const [slaPolicies, setSlaPolicies] = useState<any[]>([]);
 
   const [events, setEvents] = useState<any[]>([]);
   const [handoffNote, setHandoffNote] = useState("");
@@ -35,6 +36,7 @@ export default function TicketPage() {
     loadUser();
     loadTicket();
     loadAssignableUsers();
+    loadSlaPolicies();
     loadComments();
     loadEvents();
   }, []);
@@ -392,6 +394,66 @@ export default function TicketPage() {
     });
 
     setAssignableUsers(usersWithDisplayName);
+  }
+
+  async function loadSlaPolicies() {
+    const { data } = await supabase
+      .from("sla_policies")
+      .select("id, name, sla_hours, is_active, category, ticket_priority")
+      .eq("is_active", true)
+      .order("priority", { ascending: true });
+    setSlaPolicies(data ?? []);
+  }
+
+  async function assignSlaPolicy(policyIdRaw: string) {
+    if (!ticket) return;
+    if (!policyIdRaw) {
+      await supabase
+        .from("tickets")
+        .update({
+          sla_policy_id: null,
+          sla_hours: null,
+          sla_due_at: null,
+          sla_status: "on_track",
+        })
+        .eq("id", ticket.id);
+      await addEvent("sla_policy_removed", "Policy SLA rimossa dal ticket");
+      loadTicket();
+      return;
+    }
+
+    const policyId = Number(policyIdRaw);
+    const policy = slaPolicies.find((item) => Number(item.id) === policyId);
+    if (!policy) {
+      alert("Policy SLA non trovata");
+      return;
+    }
+
+    const slaHours = Number(policy.sla_hours);
+    if (Number.isNaN(slaHours) || slaHours <= 0) {
+      alert("La policy SLA selezionata non ha ore valide.");
+      return;
+    }
+
+    const createdAtMs = new Date(ticket.created_at ?? "").getTime();
+    if (Number.isNaN(createdAtMs)) {
+      alert("Data creazione ticket non valida.");
+      return;
+    }
+
+    const dueAt = new Date(createdAtMs + slaHours * 3600000).toISOString();
+    await supabase
+      .from("tickets")
+      .update({
+        sla_policy_id: policy.id,
+        sla_hours: slaHours,
+        sla_due_at: dueAt,
+        sla_status: "on_track",
+      })
+      .eq("id", ticket.id);
+
+    await addEvent("sla_policy_assigned", `Policy SLA assegnata: ${policy.name ?? `#${policy.id}`}`);
+    loadTicket();
   }
 
   async function assignTicket(assigneeId: string) {
@@ -865,6 +927,46 @@ export default function TicketPage() {
                   {ticket.priority}
                 </span>
               </label>
+
+              <div className="mt-3 rounded border bg-white p-2">
+                <p className="text-xs font-bold text-gray-700">SLA</p>
+                {!ticket.sla_policy_id ? (
+                  <p className="mt-1 text-xs text-amber-700">
+                    Nessuna policy SLA associata a questo ticket.
+                    {role === "team_leader"
+                      ? " Seleziona una policy qui sotto."
+                      : " Avvisa un team leader per associare una policy."}
+                  </p>
+                ) : (
+                  <p className="mt-1 text-xs text-green-700">
+                    Policy SLA associata (ID: {ticket.sla_policy_id})
+                  </p>
+                )}
+
+                {ticket.sla_due_at && (
+                  <p className="mt-1 text-xs text-gray-600">
+                    Scadenza SLA: {new Date(ticket.sla_due_at).toLocaleString("it-IT")}
+                  </p>
+                )}
+
+                {role === "team_leader" && (
+                  <label className="mt-2 block text-xs text-gray-700">
+                    Associa policy SLA
+                    <select
+                      className="mt-1 w-full rounded border p-2 text-black"
+                      value={ticket.sla_policy_id ? String(ticket.sla_policy_id) : ""}
+                      onChange={(e) => assignSlaPolicy(e.target.value)}
+                    >
+                      <option value="">Nessuna policy</option>
+                      {slaPolicies.map((policy) => (
+                        <option key={policy.id} value={policy.id}>
+                          {policy.name} ({policy.sla_hours}h)
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+              </div>
   
               <p className="mt-3">
                 Aperto il:{" "}
