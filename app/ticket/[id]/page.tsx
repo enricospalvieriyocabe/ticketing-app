@@ -294,6 +294,7 @@ export default function TicketPage() {
   function cleanInternalCommentMarkers(text: string) {
     return String(text ?? "")
       .replace(/^\[email-reply-id:[^\]]+\]\s*/i, "")
+      .replace(/^📤\s*Risposta cliente \((in coda|inviata|errore invio)\)\s*/i, "")
       .trim();
   }
 
@@ -303,8 +304,23 @@ export default function TicketPage() {
   }
 
   function getReplyStatusBadgeFromComment(text: string) {
+    const rawText = String(text ?? "");
     const queueId = extractEmailReplyIdFromComment(text);
-    if (!queueId) return null;
+    if (!queueId) {
+      const legacyMatch = rawText.match(/^📤\s*Risposta cliente \((in coda|inviata|errore invio)\)/i);
+      if (!legacyMatch) return null;
+      const legacyStatus = legacyMatch[1].toLowerCase();
+      if (legacyStatus === "inviata") return { label: "Inviata", tone: "sent", detail: null };
+      if (legacyStatus === "errore invio") {
+        const detailMatch = rawText.match(/Dettaglio errore:\s*(.+)$/im);
+        return {
+          label: "Errore invio",
+          tone: "failed",
+          detail: detailMatch?.[1]?.trim() ?? null,
+        };
+      }
+      return { label: "In coda", tone: "pending", detail: null };
+    }
     const statusInfo = replyStatusByQueueId[queueId];
     if (!statusInfo) return { label: "In coda", tone: "pending", detail: null };
     if (statusInfo.status === "sent") return { label: "Inviata", tone: "sent", detail: null };
