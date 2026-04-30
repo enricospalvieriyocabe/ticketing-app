@@ -27,9 +27,6 @@ export default function TicketPage() {
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editingCommentBody, setEditingCommentBody] = useState("");
   const [commentAuthorsById, setCommentAuthorsById] = useState<Record<string, string>>({});
-  const [replyStatusByQueueId, setReplyStatusByQueueId] = useState<
-    Record<string, { status: string; errorMessage: string | null }>
-  >({});
 
   const [events, setEvents] = useState<any[]>([]);
   const [handoffNote, setHandoffNote] = useState("");
@@ -89,33 +86,6 @@ export default function TicketPage() {
   
     const loadedComments = data ?? [];
     setComments(loadedComments);
-
-    const trackedReplyIds = Array.from(
-      new Set(
-        loadedComments
-          .map((comment: any) => extractEmailReplyIdFromComment(comment.body))
-          .filter((queueId: string | null): queueId is string => Boolean(queueId))
-      )
-    );
-
-    if (trackedReplyIds.length > 0) {
-      const { data: replyRows } = await supabase
-        .from("ticket_email_replies")
-        .select("id, status, error_message")
-        .eq("ticket_id", id)
-        .in("id", trackedReplyIds.map((item) => Number(item)));
-
-      const nextMap: Record<string, { status: string; errorMessage: string | null }> = {};
-      for (const row of replyRows ?? []) {
-        nextMap[String(row.id)] = {
-          status: String(row.status ?? "pending"),
-          errorMessage: row.error_message ? String(row.error_message) : null,
-        };
-      }
-      setReplyStatusByQueueId(nextMap);
-    } else {
-      setReplyStatusByQueueId({});
-    }
 
     const authorIds = Array.from(
       new Set(
@@ -204,7 +174,7 @@ export default function TicketPage() {
       setReplyBody("");
       await loadComments();
       await loadEvents();
-      alert("Risposta messa in coda. Sara inviata dallo script Gmail.");
+      alert("Risposta in invio. Sara inviata dallo script Gmail.");
     } catch (error) {
       alert(error instanceof Error ? error.message : "Errore invio email");
     } finally {
@@ -294,6 +264,7 @@ export default function TicketPage() {
   function cleanInternalCommentMarkers(text: string) {
     return String(text ?? "")
       .replace(/^\[email-reply-id:[^\]]+\]\s*/i, "")
+      .replace(/^\[email-reply-status:[^\]]+\]\s*/i, "")
       .replace(/^📤\s*Risposta cliente \((in coda|inviata|errore invio)\)\s*/i, "")
       .trim();
   }
@@ -303,9 +274,20 @@ export default function TicketPage() {
     return match?.[1] ?? null;
   }
 
+  function extractEmailReplyStatusFromComment(text: string) {
+    const match = String(text ?? "").match(/^\[email-reply-status:(pending|sent|failed)\]/im);
+    return match?.[1] ?? null;
+  }
+
   function getReplyStatusBadgeFromComment(text: string) {
     const rawText = String(text ?? "");
     const queueId = extractEmailReplyIdFromComment(text);
+    const markerStatus = extractEmailReplyStatusFromComment(text);
+    if (queueId && markerStatus) {
+      if (markerStatus === "sent") return { label: "Inviata", tone: "sent", detail: null };
+      if (markerStatus === "failed") return { label: "Errore invio", tone: "failed", detail: null };
+      return { label: "In invio", tone: "pending", detail: null };
+    }
     if (!queueId) {
       const legacyMatch = rawText.match(/^📤\s*Risposta cliente \((in coda|inviata|errore invio)\)/i);
       if (!legacyMatch) return null;
@@ -319,15 +301,9 @@ export default function TicketPage() {
           detail: detailMatch?.[1]?.trim() ?? null,
         };
       }
-      return { label: "In coda", tone: "pending", detail: null };
+      return { label: "In invio", tone: "pending", detail: null };
     }
-    const statusInfo = replyStatusByQueueId[queueId];
-    if (!statusInfo) return { label: "In coda", tone: "pending", detail: null };
-    if (statusInfo.status === "sent") return { label: "Inviata", tone: "sent", detail: null };
-    if (statusInfo.status === "failed") {
-      return { label: "Errore invio", tone: "failed", detail: statusInfo.errorMessage };
-    }
-    return { label: "In coda", tone: "pending", detail: null };
+    return { label: "In invio", tone: "pending", detail: null };
   }
 
   async function ensureTicketAssignedToCurrentUser(reason: string) {
@@ -598,6 +574,7 @@ export default function TicketPage() {
                 const isSystemTrackedReply = /^\[email-reply-id:[^\]]+\]/i.test(String(c.body ?? ""));
                 const replyStatusBadge = getReplyStatusBadgeFromComment(String(c.body ?? ""));
                 const isOutboundReplyComment = Boolean(replyStatusBadge);
+                const typeBadgeLabel = isOutboundReplyComment ? "Risposta email" : "Commento interno";
                 const isEditing = editingCommentId === c.id;
                 const wasEdited =
                   c.updated_at &&
@@ -619,6 +596,15 @@ export default function TicketPage() {
                       </p>
 
                       <div className="flex items-center gap-2">
+                        <span
+                          className={`rounded px-2 py-0.5 text-[11px] font-semibold ${
+                            isOutboundReplyComment
+                              ? "bg-indigo-100 text-indigo-700"
+                              : "bg-slate-100 text-slate-700"
+                          }`}
+                        >
+                          {typeBadgeLabel}
+                        </span>
                         {replyStatusBadge && (
                           <span
                             className={`rounded px-2 py-0.5 text-[11px] font-semibold ${

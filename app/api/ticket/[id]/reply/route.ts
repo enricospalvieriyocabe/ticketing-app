@@ -113,10 +113,11 @@ export async function POST(
   }
 
   const commentMarker = `[email-reply-id:${queuedReply.id}]`;
+  const statusMarker = "[email-reply-status:pending]";
   await supabaseAdmin.from("ticket_comments").insert({
     ticket_id: ticketId,
     user_id: actorUserId,
-    body: `${commentMarker}\n${replyBody}`,
+    body: `${commentMarker}\n${statusMarker}\n${replyBody}`,
   });
 
   await supabaseAdmin.from("ticket_events").insert({

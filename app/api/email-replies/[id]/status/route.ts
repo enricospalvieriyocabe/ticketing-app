@@ -75,5 +75,26 @@ export async function POST(
     });
   }
 
+  const commentMarker = `[email-reply-id:${id}]`;
+  const statusMarker = `[email-reply-status:${status}]`;
+  const { data: trackedComment } = await supabaseAdmin
+    .from("ticket_comments")
+    .select("id, body")
+    .eq("ticket_id", queueItem.ticket_id)
+    .ilike("body", `%${commentMarker}%`)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (trackedComment?.id) {
+    const originalBody = String(trackedComment.body ?? "");
+    const withoutStatusMarker = originalBody.replace(/^\[email-reply-status:[^\]]+\]\s*\n?/im, "");
+    const normalizedBody = withoutStatusMarker
+      .replace(/^\[email-reply-id:[^\]]+\]\s*\n?/im, "")
+      .trim();
+    const rebuiltBody = `${commentMarker}\n${statusMarker}\n${normalizedBody}`;
+    await supabaseAdmin.from("ticket_comments").update({ body: rebuiltBody }).eq("id", trackedComment.id);
+  }
+
   return Response.json({ ok: true });
 }
