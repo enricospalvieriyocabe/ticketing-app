@@ -21,8 +21,8 @@ export default function TicketPage() {
   const [creator, setCreator] = useState<any>(null);
 
   const [comments, setComments] = useState<any[]>([]);
-  const [newComment, setNewComment] = useState("");
-  const [replyBody, setReplyBody] = useState("");
+  const [composeMode, setComposeMode] = useState<"comment" | "reply">("comment");
+  const [composeBody, setComposeBody] = useState("");
   const [replySending, setReplySending] = useState(false);
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editingCommentBody, setEditingCommentBody] = useState("");
@@ -116,14 +116,15 @@ export default function TicketPage() {
     setCommentAuthorsById(authorsMap);
   }
 
-  async function addComment() {
-    if (!user || !newComment.trim()) return;
+  async function addComment(inputBody?: string) {
+    const body = String(inputBody ?? composeBody).trim();
+    if (!user || !body) return;
   
     const { error } = await supabase.from("ticket_comments").insert([
       {
         ticket_id: id,
         user_id: user.id,
-        body: newComment,
+        body,
       },
     ]);
   
@@ -131,7 +132,7 @@ export default function TicketPage() {
       alert(error.message);
     } else {
       await ensureTicketAssignedToCurrentUser("primo commento");
-      const mentionedEmails = extractMentionedEmails(newComment);
+      const mentionedEmails = extractMentionedEmails(body);
     
       for (const email of mentionedEmails) {
         const { data: profile } = await supabase
@@ -148,13 +149,14 @@ export default function TicketPage() {
         }
       }
     
-      setNewComment("");
+      setComposeBody("");
       loadComments();
     }
   }
 
-  async function sendReplyEmail() {
-    if (!user || !replyBody.trim()) return;
+  async function sendReplyEmail(inputBody?: string) {
+    const body = String(inputBody ?? composeBody).trim();
+    if (!user || !body) return;
     setReplySending(true);
     try {
       await ensureTicketAssignedToCurrentUser("invio risposta email");
@@ -162,7 +164,7 @@ export default function TicketPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          body: replyBody.trim(),
+          body,
           actorUserId: user.id,
         }),
       });
@@ -171,7 +173,7 @@ export default function TicketPage() {
         alert(result?.error || "Errore invio email");
         return;
       }
-      setReplyBody("");
+      setComposeBody("");
       await loadComments();
       await loadEvents();
       alert("Risposta in invio. Sara inviata dallo script Gmail.");
@@ -650,7 +652,7 @@ export default function TicketPage() {
                       </div>
                     ) : (
                       <>
-                        <p className="text-black">
+                        <p className="whitespace-pre-wrap break-words text-black">
                           {renderCommentWithMentions(cleanInternalCommentMarkers(c.body))}
                         </p>
 
@@ -676,46 +678,68 @@ export default function TicketPage() {
               </div>
             </div>
   
-            <div className="mt-4">
-            <textarea
-              className="w-full rounded border p-2 text-black"
-              placeholder="Scrivi un commento..."
-              value={newComment}
-              onChange={(e) => setNewComment(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  addComment();
-                }
-              }}
-            />
-  
-              <button
-                onClick={addComment}
-                className="mt-2 rounded bg-black px-4 py-2 text-white"
-              >
-                Aggiungi commento
-              </button>
-            </div>
-
             <div className="mt-6 rounded border bg-gray-50 p-4">
-              <h2 className="mb-2 text-lg font-bold text-black">Risposta cliente (email)</h2>
+              <h2 className="mb-2 text-lg font-bold text-black">Nuovo aggiornamento</h2>
+              <div className="mb-3 flex items-center gap-2">
+                <button
+                  onClick={() => setComposeMode("comment")}
+                  className={`rounded px-3 py-1 text-sm font-semibold ${
+                    composeMode === "comment"
+                      ? "bg-slate-800 text-white"
+                      : "bg-slate-100 text-slate-700"
+                  }`}
+                >
+                  Commento interno
+                </button>
+                <button
+                  onClick={() => setComposeMode("reply")}
+                  className={`rounded px-3 py-1 text-sm font-semibold ${
+                    composeMode === "reply"
+                      ? "bg-indigo-700 text-white"
+                      : "bg-indigo-100 text-indigo-700"
+                  }`}
+                >
+                  Risposta email
+                </button>
+              </div>
               <p className="mb-2 text-xs text-gray-600">
-                Questa azione invia una email al mittente e registra l&apos;invio nello storico attività.
+                {composeMode === "reply"
+                  ? "Questa azione invia una email al mittente e registra l'invio nello storico attività."
+                  : "Questo testo resta interno al ticket e non viene inviato al cliente."}
               </p>
               <textarea
                 className="w-full rounded border p-2 text-black"
-                placeholder="Scrivi la risposta da inviare al cliente..."
-                value={replyBody}
-                onChange={(e) => setReplyBody(e.target.value)}
+                placeholder={
+                  composeMode === "reply"
+                    ? "Scrivi la risposta da inviare al cliente..."
+                    : "Scrivi un commento interno..."
+                }
+                value={composeBody}
+                onChange={(e) => setComposeBody(e.target.value)}
                 rows={6}
+                onKeyDown={(e) => {
+                  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                    e.preventDefault();
+                    if (composeMode === "reply") {
+                      sendReplyEmail(composeBody);
+                    } else {
+                      addComment(composeBody);
+                    }
+                  }
+                }}
               />
               <button
-                onClick={sendReplyEmail}
-                disabled={replySending || !replyBody.trim()}
+                onClick={() =>
+                  composeMode === "reply" ? sendReplyEmail(composeBody) : addComment(composeBody)
+                }
+                disabled={replySending || !composeBody.trim()}
                 className="mt-2 rounded bg-black px-4 py-2 text-white disabled:opacity-60"
               >
-                {replySending ? "Invio in corso..." : "Invia risposta email"}
+                {composeMode === "reply"
+                  ? replySending
+                    ? "Invio in corso..."
+                    : "Invia risposta email"
+                  : "Aggiungi commento"}
               </button>
             </div>
           </div>
