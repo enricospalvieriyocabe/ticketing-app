@@ -1005,9 +1005,11 @@ export default function Home() {
       eventsByTicketId.set(event.ticket_id, list);
     }
 
-    const operators = assignableUsers.filter((person) => person.role === "operator");
+    const assigneesForKpi = assignableUsers.filter(
+      (person) => person.role === "operator" || person.role === "team_leader"
+    );
     const perOperator = new Map(
-      operators.map((operator) => [
+      assigneesForKpi.map((operator) => [
         operator.id,
         {
           operatorId: operator.id,
