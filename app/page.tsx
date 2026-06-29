@@ -2138,7 +2138,7 @@ export default function Home() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-[#f4f7f6] p-4">
       <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-lg">
-        <div className="bg-black px-6 py-10 text-center">
+        <div className="yocabe-gradient-bg px-6 py-10 text-center">
           <Image
             src="/logo-ticketing-auth.png"
             alt="Yocabè"
@@ -2147,7 +2147,7 @@ export default function Home() {
             className="mx-auto h-36 w-auto max-w-[min(100%,420px)] object-contain"
             priority
           />
-          <p className="mt-4 text-base font-semibold tracking-wide text-white/90">Ticketing</p>
+          <p className="mt-4 text-base font-semibold tracking-wide text-white">Ticketing</p>
         </div>
 
         <div className="p-6">
