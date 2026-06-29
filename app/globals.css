@@ -1,26 +1,37 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f4f7f6;
+  --foreground: #1a2e2b;
+  --yocabe-teal: #2db89a;
+  --yocabe-lime: #c5e837;
+  --yocabe-gradient: linear-gradient(90deg, #2db89a 0%, #9fd93a 55%, #d4e838 100%);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-yocabe-teal: var(--yocabe-teal);
+  --color-yocabe-lime: var(--yocabe-lime);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+
+.yocabe-gradient-bg {
+  background: var(--yocabe-gradient);
+}
+
+.yocabe-btn-primary {
+  background: var(--yocabe-gradient);
+  color: #ffffff;
+}
+
+.yocabe-btn-primary:hover {
+  filter: brightness(1.05);
 }

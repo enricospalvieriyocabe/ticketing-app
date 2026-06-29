@@ -2,7 +2,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { useEffect, useState, useRef } from "react";
+import Image from "next/image";
 import { supabase } from "../lib/supabase";
+import { authCallbackUrl } from "@/lib/app-url";
 import { CASE_TYPE_OPTIONS, getCaseTypeLabel } from "@/lib/ticket-classification";
 import { parseTicketContent } from "@/lib/ticket-content";
 
@@ -120,6 +122,18 @@ export default function Home() {
   useEffect(() => {
     loadAssignableUsers();
 
+    const params = new URLSearchParams(window.location.search);
+    const authError = params.get("auth_error");
+    if (authError) {
+      const messages: Record<string, string> = {
+        missing_code: "Link di conferma non valido. Richiedi una nuova email.",
+        confirm: "Conferma email fallita. Il link potrebbe essere scaduto.",
+        config: "Errore di configurazione. Contatta il team Operations.",
+      };
+      alert(messages[authError] ?? "Errore durante l'autenticazione.");
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+
     supabase.auth.getUser().then(({ data }) => {
       if (data.user) {
         setUser(data.user);
@@ -192,6 +206,7 @@ export default function Home() {
       email,
       password,
       options: {
+        emailRedirectTo: authCallbackUrl(),
         data: {
           first_name: first,
           last_name: last,
@@ -1266,7 +1281,16 @@ export default function Home() {
         <div className="sticky top-0 z-20 mb-6 rounded border bg-white p-4 shadow-sm">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-2xl font-bold text-black">Dashboard Ticketing</h1>
+              <div className="flex items-center gap-3">
+                <Image
+                  src="/logo-yocabe.png"
+                  alt="Yocabè"
+                  width={120}
+                  height={32}
+                  className="h-8 w-auto"
+                />
+                <h1 className="text-xl font-bold text-[#1a2e2b]">Dashboard Ticketing</h1>
+              </div>
               <p className="text-black">Benvenuto {getProfileDisplayName(currentProfile)}</p>
               <p className="text-sm text-gray-600">Ruolo: {role}</p>
             </div>
@@ -2112,29 +2136,42 @@ export default function Home() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-gray-100">
-      <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow">
-        <h1 className="mb-4 text-2xl font-bold text-black">
-          {authMode === "login" ? "Login Ticketing" : "Registrazione Ticketing"}
+    <main className="flex min-h-screen items-center justify-center bg-[#f4f7f6] p-4">
+      <div className="w-full max-w-sm overflow-hidden rounded-2xl bg-white shadow-lg">
+        <div className="yocabe-gradient-bg px-6 py-8 text-center">
+          <Image
+            src="/logo-yocabe.png"
+            alt="Yocabè"
+            width={180}
+            height={48}
+            className="mx-auto h-12 w-auto"
+            priority
+          />
+          <p className="mt-3 text-sm font-medium text-white/95">Operations Ticketing</p>
+        </div>
+
+        <div className="p-6">
+        <h1 className="mb-4 text-xl font-bold text-[#1a2e2b]">
+          {authMode === "login" ? "Accedi" : "Registrati"}
         </h1>
 
         <div className="mb-4 flex gap-2">
           <button
             onClick={() => setAuthMode("login")}
-            className={`w-1/2 rounded border p-2 text-sm ${
+            className={`w-1/2 rounded-lg border p-2 text-sm font-medium ${
               authMode === "login"
-                ? "border-black bg-black text-white"
-                : "border-gray-300 bg-white text-black"
+                ? "yocabe-btn-primary border-transparent"
+                : "border-gray-200 bg-white text-[#1a2e2b]"
             }`}
           >
             Login
           </button>
           <button
             onClick={() => setAuthMode("signup")}
-            className={`w-1/2 rounded border p-2 text-sm ${
+            className={`w-1/2 rounded-lg border p-2 text-sm font-medium ${
               authMode === "signup"
-                ? "border-black bg-black text-white"
-                : "border-gray-300 bg-white text-black"
+                ? "yocabe-btn-primary border-transparent"
+                : "border-gray-200 bg-white text-[#1a2e2b]"
             }`}
           >
             Registrazione
@@ -2175,16 +2212,20 @@ export default function Home() {
         />
 
         {authMode === "login" && (
-          <button onClick={signIn} className="mb-3 w-full rounded bg-black p-2 text-white">
+          <button onClick={signIn} className="yocabe-btn-primary mb-3 w-full rounded-lg p-2.5 font-medium">
             Accedi
           </button>
         )}
 
         {authMode === "signup" && (
-          <button onClick={signUp} className="w-full rounded border p-2 text-black">
+          <button
+            onClick={signUp}
+            className="yocabe-btn-primary w-full rounded-lg p-2.5 font-medium"
+          >
             Registrati
           </button>
         )}
+        </div>
       </div>
     </main>
   );
