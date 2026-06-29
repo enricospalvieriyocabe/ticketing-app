@@ -2137,17 +2137,17 @@ export default function Home() {
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-[#f4f7f6] p-4">
-      <div className="w-full max-w-sm overflow-hidden rounded-2xl bg-white shadow-lg">
-        <div className="yocabe-gradient-bg px-6 py-8 text-center">
+      <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-lg">
+        <div className="yocabe-gradient-bg px-6 py-10 text-center">
           <Image
-            src="/logo-yocabe.png"
+            src="/logo-ticketing-auth.png"
             alt="Yocabè"
-            width={180}
-            height={48}
-            className="mx-auto h-12 w-auto"
+            width={540}
+            height={144}
+            className="mx-auto h-36 w-auto max-w-[min(100%,360px)]"
             priority
           />
-          <p className="mt-3 text-sm font-medium text-white/95">Operations Ticketing</p>
+          <p className="mt-4 text-base font-semibold tracking-wide text-white">Ticketing</p>
         </div>
 
         <div className="p-6">

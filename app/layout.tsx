@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Yocabè Operations — Ticketing",
+  title: "Yocabè — Ticketing",
   description: "Sistema ticketing Operations & Customer Service — Yocabè",
   icons: {
     icon: "/logo-yocabe.png",
