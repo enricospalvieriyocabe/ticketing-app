@@ -2,73 +2,50 @@
 
 **Cartella codice:** `C:\Users\enric\Documents\cursor\goal\goals\goal-02-ticketing`
 
-## Ambiente principale (produzione)
+## URL ufficiale
 
-**URL:** https://ticketing-app-ashen.vercel.app/
+| Priorità | URL | Stato |
+|----------|-----|--------|
+| **Obiettivo** | https://ticketing-yocabe.app | Da acquistare/collegare — vedi guida sotto |
+| **Intermedio** | https://ticketing-yocabe.vercel.app | DNS ok — collegare al progetto Vercel |
+| Legacy | https://ticketing-app-ashen.vercel.app | Funziona oggi — da sostituire |
 
-Usa sempre questo per:
-- lavoro operativo con il team (Giulia, CS, OPS)
-- pilota FBY Binda / Jadea
-- ingest Gmail (Apps Script)
-- demo e team meeting
-
-**Backend:** Supabase progetto `ticketing-app` (riesumato 2026-06)
-
-### Checklist produzione
-
-| # | Controllo | Dove |
-|---|-----------|------|
-| 1 | App risponde | apri URL Vercel → login OK |
-| 2 | Env Vercel = Supabase attivo | Vercel → Project → **Settings → Environment Variables** |
-| 3 | Ingest Gmail | Apps Script `API_URL` = `https://ticketing-app-ashen.vercel.app/api/email-ingest` |
-| 4 | Reply outbound | Apps Script `BASE_URL` = `https://ticketing-app-ashen.vercel.app` |
-
-Variabili richieste su **Vercel** (stesse di `.env.local` locale):
-
-```
-NEXT_PUBLIC_SUPABASE_URL
-NEXT_PUBLIC_SUPABASE_ANON_KEY
-SUPABASE_SERVICE_ROLE_KEY
-EMAIL_INGEST_TOKEN
-EMAIL_INGEST_SYSTEM_USER_ID
-EMAIL_INGEST_DEFAULT_CATEGORY
-EMAIL_INGEST_DEFAULT_PRIORITY
-EMAIL_INGEST_IGNORE_FROM   (opzionale)
-```
-
-Dopo modifica env su Vercel: **Redeploy** (Deployments → ⋯ → Redeploy).
-
-### Deploy nuovo codice
-
-Le modifiche al codice in locale **non** compaiono su Vercel finché non fai deploy:
-
-- push su branch collegato a Vercel, oppure
-- `npx vercel --prod` dalla cartella progetto (se CLI configurata)
+**Guida passo-passo (solo click, zero codice):** `docs/DOMINIO-SETUP-ENRICO.md`
 
 ---
 
-## Ambiente locale (solo sviluppo)
+## Variabile Vercel (obbligatoria)
+
+```
+NEXT_PUBLIC_APP_URL=https://ticketing-yocabe.app
+```
+
+(fino a quando il `.app` non è attivo, usa `https://ticketing-yocabe.vercel.app`)
+
+Dopo ogni modifica → **Redeploy** su Vercel.
+
+---
+
+## Supabase Auth
+
+Site URL e Redirect URLs devono usare **lo stesso URL** di `NEXT_PUBLIC_APP_URL`.  
+Dettaglio: `docs/SUPABASE-AUTH-SETUP.md`
+
+---
+
+## Sviluppo locale (opzionale)
 
 ```powershell
 cd "C:\Users\enric\Documents\cursor\goal\goals\goal-02-ticketing"
 npm run dev
 ```
 
-→ http://localhost:3000 — utile per test rapidi prima del deploy, **non** per Gmail ingest.
-
----
-
-## Supabase — pausa automatica (piano Free)
-
-I progetti Free si **pausano dopo ~7 giorni senza traffico** sul database.
-
-- **Prevenzione:** uso quotidiano via Vercel + pilota clienti, oppure upgrade Pro, oppure ping settimanale
-- Docs: https://supabase.com/docs/guides/platform/free-project-pausing
+→ http://localhost:3000 — solo per test sviluppo, non per il team.
 
 ---
 
 ## Riferimenti
 
-- `docs/gmail-custom-ingest.md` — Apps Script inbound/outbound
-- `docs/ticketing-system-summary.md` — funzionalità implementate
-- `COCKPIT/goal-02-roadmap-q3.md` — pilota FBY, BigQuery, ordini rifiutati WH
+- `docs/DOMINIO-SETUP-ENRICO.md` — **inizia da qui**
+- `docs/gmail-custom-ingest.md` — Apps Script Gmail
+- `COCKPIT/goal-02-roadmap-q3.md` — pilota FBY

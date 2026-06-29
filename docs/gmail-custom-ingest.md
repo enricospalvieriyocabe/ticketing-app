@@ -93,7 +93,7 @@ Puoi usare Apps Script con trigger ogni 1-5 minuti per leggere la label `to-tick
 
 ```javascript
 function pushToTicketing() {
-  const API_URL = "https://ticketing-app-ashen.vercel.app/api/email-ingest";
+  const API_URL = "https://ticketing-yocabe.app/api/email-ingest";
   const TOKEN = "EMAIL_INGEST_TOKEN";
   const LABEL_TO_READ = "to-ticket";
   const LABEL_PROCESSED = "processed-ticket";
@@ -139,7 +139,7 @@ function pushToTicketing() {
 }
 
 function processOutboundReplies() {
-  const BASE_URL = "https://ticketing-app-ashen.vercel.app";
+  const BASE_URL = "https://ticketing-yocabe.app";
   const TOKEN = "EMAIL_INGEST_TOKEN";
 
   const pendingRes = UrlFetchApp.fetch(BASE_URL + "/api/email-replies/pending?limit=20", {
