@@ -2144,7 +2144,7 @@ export default function Home() {
             alt="Yocabè"
             width={400}
             height={100}
-            className="mx-auto h-18 w-auto max-w-[min(100%,210px)] object-contain"
+            className="mx-auto h-[72px] w-auto max-w-[min(100%,210px)] object-contain"
             priority
           />
           <p className="mt-4 text-xl font-semibold tracking-wide text-white">Ticketing</p>
