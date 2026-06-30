@@ -6,7 +6,7 @@ import Image from "next/image";
 import { supabase } from "../lib/supabase";
 import { authCallbackUrl, resetPasswordUrl } from "@/lib/app-url";
 import { parseResendCooldownMs, translateAuthError } from "@/lib/auth-errors";
-import { ensureUserProfile, syncProfileFromMetadata } from "@/lib/profile-sync";
+import { ensureUserProfile, fetchCurrentUserProfile, syncProfileFromMetadata } from "@/lib/profile-sync";
 import { CASE_TYPE_OPTIONS, getCaseTypeLabel } from "@/lib/ticket-classification";
 import { parseTicketContent } from "@/lib/ticket-content";
 
@@ -467,26 +467,15 @@ export default function Home() {
   }
 
   async function loadTickets(currentUser: any) {
-    let { data: profile } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("id", currentUser.id)
-      .maybeSingle();
+    let profile = await fetchCurrentUserProfile(currentUser);
 
     if (!profile) {
       await ensureUserProfile(currentUser);
-
-      const retry = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", currentUser.id)
-        .maybeSingle();
-
-      profile = retry.data;
+      profile = await fetchCurrentUserProfile(currentUser);
 
       if (!profile) {
         const meta = currentUser.user_metadata ?? {};
-        const response = await fetch("/api/auth/ensure-profile", {
+        await fetch("/api/auth/ensure-profile", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -498,21 +487,13 @@ export default function Home() {
             role: meta.role,
           }),
         });
-
-        if (response.ok) {
-          const finalRetry = await supabase
-            .from("profiles")
-            .select("*")
-            .eq("id", currentUser.id)
-            .maybeSingle();
-          profile = finalRetry.data;
-        }
+        profile = await fetchCurrentUserProfile(currentUser);
       }
     }
 
     if (!profile) {
       alert(
-        "Profilo non trovato. Su Supabase aggiungi una riga in profiles collegata a questo utente, oppure riprova tra qualche secondo."
+        "Profilo non trovato. Verifica su Supabase che la riga in profiles abbia lo stesso id dell'utente in Authentication → Users."
       );
       return;
     }
