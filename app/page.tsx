@@ -6,7 +6,7 @@ import Image from "next/image";
 import { supabase } from "../lib/supabase";
 import { authCallbackUrl, resetPasswordUrl } from "@/lib/app-url";
 import { parseResendCooldownMs, translateAuthError } from "@/lib/auth-errors";
-import { ensureUserProfile, fetchCurrentUserProfile, syncProfileFromMetadata } from "@/lib/profile-sync";
+import { fetchCurrentUserProfile, syncProfileFromMetadata } from "@/lib/profile-sync";
 import { CASE_TYPE_OPTIONS, getCaseTypeLabel } from "@/lib/ticket-classification";
 import { parseTicketContent } from "@/lib/ticket-content";
 
@@ -133,6 +133,7 @@ export default function Home() {
     closed: false,
   });
   const notificationRef = useRef<HTMLDivElement>(null);
+  const profileAlertShownFor = useRef<string | null>(null);
 
   function rememberPendingEmail(value: string) {
     const normalized = value.trim().toLowerCase();
@@ -209,8 +210,9 @@ export default function Home() {
       if (data.user) {
         clearPendingEmail();
         setUser(data.user);
+        const { data: sessionData } = await supabase.auth.getSession();
         syncProfileFromMetadata(data.user);
-        loadTickets(data.user);
+        loadTickets(data.user, sessionData.session?.access_token);
         loadNotifications(data.user);
         if (accessToken || authError) {
           window.history.replaceState({}, "", window.location.pathname);
@@ -230,7 +232,7 @@ export default function Home() {
         clearPendingEmail();
         setUser(session.user);
         syncProfileFromMetadata(session.user);
-        loadTickets(session.user);
+        loadTickets(session.user, session.access_token);
         loadNotifications(session.user);
       } else {
         setUser(null);
@@ -441,8 +443,6 @@ export default function Home() {
       }
       return;
     }
-
-    alert("Login effettuato!");
   }
 
   async function logout() {
@@ -466,37 +466,18 @@ export default function Home() {
     return fullName || composedName || genericName || profile.email || "Utente";
   }
 
-  async function loadTickets(currentUser: any) {
-    let profile = await fetchCurrentUserProfile(currentUser);
+  async function loadTickets(currentUser: any, accessToken?: string) {
+    const { profile, error } = await fetchCurrentUserProfile(currentUser, { accessToken });
 
     if (!profile) {
-      await ensureUserProfile(currentUser);
-      profile = await fetchCurrentUserProfile(currentUser);
-
-      if (!profile) {
-        const meta = currentUser.user_metadata ?? {};
-        await fetch("/api/auth/ensure-profile", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            userId: currentUser.id,
-            email: currentUser.email,
-            first_name: meta.first_name,
-            last_name: meta.last_name,
-            company_name: meta.company_name,
-            role: meta.role,
-          }),
-        });
-        profile = await fetchCurrentUserProfile(currentUser);
+      if (profileAlertShownFor.current !== currentUser.id) {
+        profileAlertShownFor.current = currentUser.id;
+        alert(error ?? "Impossibile caricare il profilo. Riprova tra qualche secondo.");
       }
-    }
-
-    if (!profile) {
-      alert(
-        "Profilo non trovato. Verifica su Supabase che la riga in profiles abbia lo stesso id dell'utente in Authentication → Users."
-      );
       return;
     }
+
+    profileAlertShownFor.current = null;
 
     setRole(profile.role);
     setCurrentProfile(profile);
@@ -511,9 +492,9 @@ export default function Home() {
       query = query.or(`assigned_to.eq.${currentUser.id},created_by.eq.${currentUser.id}`);
     }
 
-    const { data, error } = await query.order("created_at", { ascending: false });
+    const { data, error: ticketsError } = await query.order("created_at", { ascending: false });
 
-    if (error) alert(error.message);
+    if (ticketsError) alert(ticketsError.message);
     else setTickets(collapseEmailThreadDuplicates(data ?? []));
   }
 

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { buildProfilePayload, removeStaleProfileByEmail } from "@/lib/profile-repair";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
 type EnsureProfileBody = {
@@ -29,18 +30,27 @@ export async function POST(request: Request) {
     const role = String(body.role ?? "user").trim() || "user";
 
     const admin = getSupabaseAdmin();
-    const { error } = await admin.from("profiles").upsert(
-      {
+    await removeStaleProfileByEmail(admin, email, userId);
+
+    const profilePayload = {
+      ...buildProfilePayload({
         id: userId,
         email,
-        first_name: firstName || null,
-        last_name: lastName || null,
-        full_name: fullName,
-        company_name: companyName || null,
-        role,
-      },
-      { onConflict: "id" }
-    );
+        user_metadata: {
+          first_name: firstName,
+          last_name: lastName,
+          company_name: companyName,
+          role,
+        },
+      }),
+      first_name: firstName || null,
+      last_name: lastName || null,
+      full_name: fullName,
+      company_name: companyName || null,
+      role,
+    };
+
+    const { error } = await admin.from("profiles").upsert(profilePayload, { onConflict: "id" });
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
@@ -49,6 +59,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Errore imprevisto";
+    if (message.includes("SUPABASE_SERVICE_ROLE_KEY")) {
+      return NextResponse.json(
+        {
+          error:
+            "Configurazione server incompleta: manca SUPABASE_SERVICE_ROLE_KEY su Vercel.",
+        },
+        { status: 500 }
+      );
+    }
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

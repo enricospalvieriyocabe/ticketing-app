@@ -15,6 +15,11 @@ export type SignupDraft = {
   company_name: string;
 };
 
+export type ProfileLoadResult = {
+  profile: Record<string, unknown> | null;
+  error?: string;
+};
+
 export function rememberSignupDraft(draft: SignupDraft) {
   sessionStorage.setItem(SIGNUP_DRAFT_KEY, JSON.stringify(draft));
 }
@@ -75,78 +80,116 @@ function buildProfilePayload(currentUser: AuthUserLike) {
   return payload;
 }
 
-export async function ensureUserProfile(currentUser: AuthUserLike) {
-  await supabase.auth.refreshSession();
-  const { data: refreshed } = await supabase.auth.getUser();
-  const user = refreshed.user ?? currentUser;
-  const payload = buildProfilePayload(user);
+async function getAccessToken(explicitToken?: string) {
+  if (explicitToken) return explicitToken;
 
-  const { error: rpcError } = await supabase.rpc("sync_profile_from_auth");
-  if (!rpcError) {
-    clearSignupDraft();
-    return { error: null };
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+    if (token) return token;
+    await new Promise((resolve) => setTimeout(resolve, 200));
   }
 
-  const { error: upsertError } = await supabase
-    .from("profiles")
-    .upsert(payload, { onConflict: "id" });
-
-  if (!upsertError) {
-    clearSignupDraft();
-  }
-
-  return { error: upsertError ?? rpcError };
+  return null;
 }
 
-export async function fetchCurrentUserProfile(currentUser: AuthUserLike) {
+async function fetchProfileFromApi(token: string) {
+  const response = await fetch("/api/auth/profile", {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  return { response, payload };
+}
+
+async function ensureProfileOnServer(currentUser: AuthUserLike) {
+  const meta = currentUser.user_metadata ?? {};
+  const response = await fetch("/api/auth/ensure-profile", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      userId: currentUser.id,
+      email: currentUser.email,
+      first_name: meta.first_name,
+      last_name: meta.last_name,
+      company_name: meta.company_name,
+      role: meta.role,
+    }),
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  return { response, payload };
+}
+
+export async function fetchCurrentUserProfile(
+  currentUser: AuthUserLike,
+  options?: { accessToken?: string }
+): Promise<ProfileLoadResult> {
+  const token = await getAccessToken(options?.accessToken);
+  if (!token) {
+    return {
+      profile: null,
+      error: "Sessione non ancora pronta. Attendi un secondo e riprova.",
+    };
+  }
+
+  let { response, payload } = await fetchProfileFromApi(token);
+  if (response.ok && payload.profile) {
+    return { profile: payload.profile };
+  }
+
+  if (!response.ok && payload.error) {
+    const serverError = String(payload.error);
+    if (
+      serverError.includes("SUPABASE_SERVICE_ROLE_KEY") ||
+      serverError.includes("Configurazione server")
+    ) {
+      return { profile: null, error: serverError };
+    }
+  }
+
+  const ensured = await ensureProfileOnServer(currentUser);
+  if (!ensured.response.ok) {
+    return {
+      profile: null,
+      error: String(ensured.payload.error ?? "Impossibile creare il profilo sul server."),
+    };
+  }
+
+  ({ response, payload } = await fetchProfileFromApi(token));
+  if (response.ok && payload.profile) {
+    return { profile: payload.profile };
+  }
+
   const { data: profile } = await supabase
     .from("profiles")
     .select("*")
     .eq("id", currentUser.id)
     .maybeSingle();
 
-  if (profile) return profile;
+  if (profile) {
+    return { profile };
+  }
 
-  const { data: sessionData } = await supabase.auth.getSession();
-  const token = sessionData.session?.access_token;
-  if (!token) return null;
+  return {
+    profile: null,
+    error: String(
+      payload.error ??
+        "Impossibile caricare il profilo. Verifica SUPABASE_SERVICE_ROLE_KEY su Vercel."
+    ),
+  };
+}
 
-  const response = await fetch("/api/auth/profile", {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-
-  if (!response.ok) return null;
-
-  const payload = await response.json().catch(() => ({}));
-  return payload.profile ?? null;
+export async function ensureUserProfile(currentUser: AuthUserLike) {
+  const result = await fetchCurrentUserProfile(currentUser);
+  return { error: result.error ?? null };
 }
 
 export async function syncProfileFromMetadata(currentUser: AuthUserLike) {
-  await supabase.auth.refreshSession();
-  const { data: refreshed } = await supabase.auth.getUser();
-  const user = refreshed.user ?? currentUser;
-
-  const payload = buildProfilePayload(user);
-  const hasExtraProfileFields =
-    payload.first_name || payload.last_name || payload.full_name || payload.company_name;
-
-  if (!hasExtraProfileFields) {
-    return ensureUserProfile(currentUser);
-  }
-
-  const { error: rpcError } = await supabase.rpc("sync_profile_from_auth");
-  if (!rpcError) {
-    clearSignupDraft();
-    return { error: null };
-  }
-
-  const { error: upsertError } = await supabase
-    .from("profiles")
-    .upsert(payload, { onConflict: "id" });
-
-  if (!upsertError) {
+  const result = await fetchCurrentUserProfile(currentUser);
+  if (result.profile) {
     clearSignupDraft();
   }
-
-  return { error: upsertError ?? rpcError };
+  return { error: result.error ?? null };
 }
