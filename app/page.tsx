@@ -52,7 +52,9 @@ export default function Home() {
   const [password, setPassword] = useState("");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
+  const [companyName, setCompanyName] = useState("");
   const [authMode, setAuthMode] = useState<"login" | "signup">("login");
+  const [pendingConfirmationEmail, setPendingConfirmationEmail] = useState("");
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -150,6 +152,7 @@ export default function Home() {
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.user) {
         setUser(session.user);
+        syncProfileFromMetadata(session.user);
         loadTickets(session.user);
         loadNotifications(session.user);
       } else {
@@ -192,18 +195,45 @@ export default function Home() {
     };
   }, []);
 
+  async function syncProfileFromMetadata(currentUser: any) {
+    const meta = currentUser.user_metadata ?? {};
+    await supabase.from("profiles").upsert(
+      {
+        id: currentUser.id,
+        email: currentUser.email,
+        first_name: meta.first_name ?? null,
+        last_name: meta.last_name ?? null,
+        full_name: meta.full_name ?? null,
+        company_name: meta.company_name ?? null,
+      },
+      { onConflict: "id" }
+    );
+  }
+
   async function signUp() {
     const first = firstName.trim();
     const last = lastName.trim();
+    const company = companyName.trim();
     const full = `${first} ${last}`.trim();
+    const signupEmail = email.trim();
 
     if (!first || !last) {
       alert("Inserisci nome e cognome");
       return;
     }
 
+    if (!company) {
+      alert("Inserisci il nome dell'azienda");
+      return;
+    }
+
+    if (!signupEmail || !password.trim()) {
+      alert("Inserisci email e password");
+      return;
+    }
+
     const { data, error } = await supabase.auth.signUp({
-      email,
+      email: signupEmail,
       password,
       options: {
         emailRedirectTo: authCallbackUrl(),
@@ -211,6 +241,7 @@ export default function Home() {
           first_name: first,
           last_name: last,
           full_name: full,
+          company_name: company,
         },
       },
     });
@@ -220,22 +251,52 @@ export default function Home() {
       return;
     }
 
-    if (data.user?.id) {
-      await supabase.from("profiles").upsert(
-        {
-          id: data.user.id,
-          email,
-          first_name: first,
-          last_name: last,
-          full_name: full,
-        },
-        { onConflict: "id" }
+    if (data.user?.identities?.length === 0) {
+      alert(
+        "Questa email risulta già registrata. Prova ad accedere oppure usa «Reinvia email di conferma»."
       );
+      setPendingConfirmationEmail(signupEmail);
+      return;
     }
 
+    if (data.user?.id && data.session) {
+      await syncProfileFromMetadata(data.user);
+      setFirstName("");
+      setLastName("");
+      setCompanyName("");
+      setPendingConfirmationEmail("");
+      alert("Registrazione completata. Puoi accedere.");
+      return;
+    }
+
+    setPendingConfirmationEmail(signupEmail);
     setFirstName("");
     setLastName("");
-    alert("Controlla la mail per confermare");
+    setCompanyName("");
+    alert(
+      "Registrazione avviata. Controlla la casella email (anche spam) per confermare l'account. Se non arriva nulla entro 5 minuti, clicca «Reinvia email di conferma»."
+    );
+  }
+
+  async function resendConfirmationEmail() {
+    const targetEmail = (pendingConfirmationEmail || email).trim();
+    if (!targetEmail) {
+      alert("Inserisci l'email usata in registrazione");
+      return;
+    }
+
+    const { error } = await supabase.auth.resend({
+      type: "signup",
+      email: targetEmail,
+      options: { emailRedirectTo: authCallbackUrl() },
+    });
+
+    if (error) {
+      alert(`Reinvio non riuscito: ${error.message}`);
+      return;
+    }
+
+    alert("Email di conferma reinviata. Controlla anche la cartella spam.");
   }
 
   async function signIn() {
@@ -2193,6 +2254,13 @@ export default function Home() {
               value={lastName}
               onChange={(e) => setLastName(e.target.value)}
             />
+
+            <input
+              className="mb-3 w-full rounded border p-2 text-black"
+              placeholder="Azienda"
+              value={companyName}
+              onChange={(e) => setCompanyName(e.target.value)}
+            />
           </>
         )}
 
@@ -2224,6 +2292,22 @@ export default function Home() {
           >
             Registrati
           </button>
+        )}
+
+        {authMode === "signup" && pendingConfirmationEmail && (
+          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+            <p className="mb-2">
+              In attesa di conferma per <strong>{pendingConfirmationEmail}</strong>. Controlla anche
+              spam.
+            </p>
+            <button
+              type="button"
+              onClick={resendConfirmationEmail}
+              className="font-medium text-[#1a6b5c] underline"
+            >
+              Reinvia email di conferma
+            </button>
+          </div>
         )}
         </div>
       </div>
