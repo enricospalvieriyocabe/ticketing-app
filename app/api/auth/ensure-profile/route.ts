@@ -25,38 +25,42 @@ export async function POST(request: Request) {
     const firstName = String(body.first_name ?? "").trim();
     const lastName = String(body.last_name ?? "").trim();
     const companyName = String(body.company_name ?? "").trim();
-    const fullName =
-      firstName && lastName ? `${firstName} ${lastName}` : firstName || lastName || null;
-    const role = String(body.role ?? "user").trim() || "user";
+    const role = String(body.role ?? "").trim();
 
     const admin = getSupabaseAdmin();
+    const { data: existing } = await admin
+      .from("profiles")
+      .select("*")
+      .eq("id", userId)
+      .maybeSingle();
+
     await removeStaleProfileByEmail(admin, email, userId);
 
-    const profilePayload = {
-      ...buildProfilePayload({
+    const profilePayload = buildProfilePayload(
+      {
         id: userId,
         email,
         user_metadata: {
           first_name: firstName,
           last_name: lastName,
           company_name: companyName,
-          role,
+          role: role || undefined,
         },
-      }),
-      first_name: firstName || null,
-      last_name: lastName || null,
-      full_name: fullName,
-      company_name: companyName || null,
-      role,
-    };
+      },
+      existing
+    );
 
-    const { error } = await admin.from("profiles").upsert(profilePayload, { onConflict: "id" });
+    const { data: profile, error } = await admin
+      .from("profiles")
+      .upsert(profilePayload, { onConflict: "id" })
+      .select("*")
+      .single();
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, profile });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Errore imprevisto";
     if (message.includes("SUPABASE_SERVICE_ROLE_KEY")) {

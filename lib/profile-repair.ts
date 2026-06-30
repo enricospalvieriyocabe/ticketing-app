@@ -46,32 +46,35 @@ export async function removeStaleProfileByEmail(
   }
 }
 
+function nonEmpty(value: string | null | undefined): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed || null;
+}
+
 export function buildProfilePayload(
   user: { id: string; email?: string | null; user_metadata?: Record<string, unknown> },
   existing?: ProfileRow | null
 ) {
   const meta = user.user_metadata ?? {};
   const email = user.email?.toLowerCase() ?? "";
+  const metaFirst = readMetaString(meta, "first_name");
+  const metaLast = readMetaString(meta, "last_name");
+  const metaFull = readMetaString(meta, "full_name");
+  const metaCompany = readMetaString(meta, "company_name");
+  const metaRole = readMetaString(meta, "role");
 
   return {
     id: user.id,
     email,
-    first_name:
-      existing?.first_name ??
-      readMetaString(meta, "first_name"),
-    last_name:
-      existing?.last_name ??
-      readMetaString(meta, "last_name"),
+    first_name: nonEmpty(existing?.first_name) ?? metaFirst,
+    last_name: nonEmpty(existing?.last_name) ?? metaLast,
     full_name:
-      existing?.full_name ??
-      readMetaString(meta, "full_name") ??
-      (readMetaString(meta, "first_name") && readMetaString(meta, "last_name")
-        ? `${readMetaString(meta, "first_name")} ${readMetaString(meta, "last_name")}`
-        : null),
-    company_name:
-      existing?.company_name ??
-      readMetaString(meta, "company_name"),
-    role: existing?.role ?? readMetaString(meta, "role") ?? "user",
+      nonEmpty(existing?.full_name) ??
+      metaFull ??
+      (metaFirst && metaLast ? `${metaFirst} ${metaLast}` : null),
+    company_name: nonEmpty(existing?.company_name) ?? metaCompany,
+    role: nonEmpty(existing?.role) ?? metaRole ?? "user",
   };
 }
 
@@ -91,21 +94,15 @@ export async function upsertProfileForUser(
     return { profile: null, error: profileByIdError.message };
   }
 
-  if (profileById) {
-    return { profile: profileById };
-  }
-
-  const { data: profileByEmail } = await admin
-    .from("profiles")
-    .select("*")
-    .eq("email", email)
-    .maybeSingle();
+  const { data: profileByEmail } = profileById
+    ? { data: null }
+    : await admin.from("profiles").select("*").eq("email", email).maybeSingle();
 
   if (email) {
     await removeStaleProfileByEmail(admin, email, user.id);
   }
 
-  const profilePayload = buildProfilePayload(user, profileByEmail);
+  const profilePayload = buildProfilePayload(user, profileById ?? profileByEmail);
 
   const { data: profile, error: upsertError } = await admin
     .from("profiles")
@@ -117,5 +114,5 @@ export async function upsertProfileForUser(
     return { profile: null, error: upsertError.message };
   }
 
-  return { profile, repaired: Boolean(profileByEmail) };
+  return { profile, repaired: Boolean(profileByEmail && profileByEmail.id !== user.id) };
 }

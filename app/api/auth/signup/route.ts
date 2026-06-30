@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { authCallbackUrl } from "@/lib/app-url";
+import { removeStaleProfileByEmail, upsertProfileForUser } from "@/lib/profile-repair";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
 type SignupBody = {
@@ -10,6 +11,27 @@ type SignupBody = {
   last_name?: string;
   company_name?: string;
 };
+
+function profileUserPayload(
+  userId: string,
+  email: string,
+  firstName: string,
+  lastName: string,
+  fullName: string,
+  companyName: string
+) {
+  return {
+    id: userId,
+    email,
+    user_metadata: {
+      first_name: firstName,
+      last_name: lastName,
+      full_name: fullName,
+      company_name: companyName,
+      role: "user",
+    },
+  };
+}
 
 export async function POST(request: Request) {
   try {
@@ -37,18 +59,21 @@ export async function POST(request: Request) {
     }
 
     const admin = getSupabaseAdmin();
+    const profileMeta = profileUserPayload(
+      "",
+      email,
+      firstName,
+      lastName,
+      fullName,
+      companyName
+    ).user_metadata;
 
     const { data, error } = await admin.auth.signUp({
       email,
       password,
       options: {
         emailRedirectTo: authCallbackUrl(),
-        data: {
-          first_name: firstName,
-          last_name: lastName,
-          full_name: fullName,
-          company_name: companyName,
-        },
+        data: profileMeta,
       },
     });
 
@@ -58,35 +83,28 @@ export async function POST(request: Request) {
         message.includes("email rate limit") || message.includes("rate limit exceeded");
 
       if (rateLimited) {
-        const { data: existingProfile } = await admin
-          .from("profiles")
-          .select("id, email")
-          .eq("email", email)
-          .maybeSingle();
-
-        let userId = existingProfile?.id ?? null;
-
-        if (!userId) {
-          const { data: listed } = await admin.auth.admin.listUsers({ perPage: 200 });
-          const existingUser = listed.users.find(
-            (user) => user.email?.toLowerCase() === email
-          );
-          userId = existingUser?.id ?? null;
-        }
+        const { data: listed } = await admin.auth.admin.listUsers({ perPage: 200 });
+        const existingUser = listed.users.find(
+          (user) => user.email?.toLowerCase() === email
+        );
+        const userId = existingUser?.id ?? null;
 
         if (userId) {
-          await admin.from("profiles").upsert(
-            {
-              id: userId,
-              email,
-              first_name: firstName,
-              last_name: lastName,
-              full_name: fullName,
-              company_name: companyName,
-              role: "user",
-            },
-            { onConflict: "id" }
+          await admin.auth.admin.updateUserById(userId, {
+            user_metadata: profileMeta,
+          });
+          await removeStaleProfileByEmail(admin, email, userId);
+          const { profile, error: profileError } = await upsertProfileForUser(
+            admin,
+            profileUserPayload(userId, email, firstName, lastName, fullName, companyName)
           );
+
+          if (profileError || !profile?.company_name) {
+            return NextResponse.json(
+              { error: profileError ?? "Profilo non salvato correttamente" },
+              { status: 500 }
+            );
+          }
 
           return NextResponse.json({
             status: "pending_confirmation",
@@ -116,22 +134,24 @@ export async function POST(request: Request) {
       );
     }
 
-    const { error: profileError } = await admin.from("profiles").upsert(
-      {
-        id: data.user.id,
-        email,
-        first_name: firstName,
-        last_name: lastName,
-        full_name: fullName,
-        company_name: companyName,
-        role: "user",
-      },
-      { onConflict: "id" }
+    await admin.auth.admin.updateUserById(data.user.id, {
+      user_metadata: profileMeta,
+    });
+
+    await removeStaleProfileByEmail(admin, email, data.user.id);
+
+    const { profile, error: profileError } = await upsertProfileForUser(
+      admin,
+      profileUserPayload(data.user.id, email, firstName, lastName, fullName, companyName)
     );
 
-    if (profileError) {
+    if (profileError || !profile?.first_name || !profile?.company_name) {
       return NextResponse.json(
-        { error: `Profilo non salvato: ${profileError.message}` },
+        {
+          error: profileError
+            ? `Profilo non salvato: ${profileError}`
+            : "Profilo incompleto dopo la registrazione. Riprova.",
+        },
         { status: 500 }
       );
     }
@@ -140,6 +160,7 @@ export async function POST(request: Request) {
       status: data.session ? "complete" : "pending_confirmation",
       email,
       userId: data.user.id,
+      profile,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Errore imprevisto";

@@ -6,7 +6,7 @@ import Image from "next/image";
 import { supabase } from "../lib/supabase";
 import { authCallbackUrl, resetPasswordUrl } from "@/lib/app-url";
 import { parseResendCooldownMs, translateAuthError } from "@/lib/auth-errors";
-import { fetchCurrentUserProfile, syncProfileFromMetadata } from "@/lib/profile-sync";
+import { fetchCurrentUserProfile, rememberSignupDraft, syncProfileFromMetadata } from "@/lib/profile-sync";
 import { CASE_TYPE_OPTIONS, getCaseTypeLabel } from "@/lib/ticket-classification";
 import { parseTicketContent } from "@/lib/ticket-content";
 
@@ -294,6 +294,13 @@ export default function Home() {
       alert("Inserisci email e password");
       return;
     }
+
+    rememberSignupDraft({
+      email: signupEmail,
+      first_name: first,
+      last_name: last,
+      company_name: company,
+    });
 
     const response = await fetch("/api/auth/signup", {
       method: "POST",
@@ -1482,7 +1489,9 @@ export default function Home() {
                 <h1 className="text-xl font-bold text-[#1a2e2b]">Dashboard Ticketing</h1>
               </div>
               <p className="text-black">Benvenuto {getProfileDisplayName(currentProfile)}</p>
-              <p className="text-sm text-gray-600">Ruolo: {role}</p>
+              {currentProfile?.company_name ? (
+                <p className="text-sm text-gray-600">{currentProfile.company_name}</p>
+              ) : null}
             </div>
 
             <div className="mb-6 flex items-center justify-between">

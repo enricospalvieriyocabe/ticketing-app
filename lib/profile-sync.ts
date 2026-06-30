@@ -104,6 +104,7 @@ async function fetchProfileFromApi(token: string) {
 }
 
 async function ensureProfileOnServer(currentUser: AuthUserLike) {
+  const draft = readSignupDraft(currentUser.email);
   const meta = currentUser.user_metadata ?? {};
   const response = await fetch("/api/auth/ensure-profile", {
     method: "POST",
@@ -111,9 +112,9 @@ async function ensureProfileOnServer(currentUser: AuthUserLike) {
     body: JSON.stringify({
       userId: currentUser.id,
       email: currentUser.email,
-      first_name: meta.first_name,
-      last_name: meta.last_name,
-      company_name: meta.company_name,
+      first_name: meta.first_name ?? draft?.first_name,
+      last_name: meta.last_name ?? draft?.last_name,
+      company_name: meta.company_name ?? draft?.company_name,
       role: meta.role,
     }),
   });
