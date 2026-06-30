@@ -124,30 +124,53 @@ export default function Home() {
   useEffect(() => {
     loadAssignableUsers();
 
-    const params = new URLSearchParams(window.location.search);
-    const authError = params.get("auth_error");
-    if (authError) {
-      const messages: Record<string, string> = {
-        missing_code: "Link di conferma non valido. Richiedi una nuova email.",
-        confirm: "Conferma email fallita. Il link potrebbe essere scaduto.",
-        config: "Errore di configurazione. Contatta il team Operations.",
-      };
-      alert(messages[authError] ?? "Errore durante l'autenticazione.");
-      window.history.replaceState({}, "", window.location.pathname);
-    }
+    async function bootstrapAuth() {
+      const hash = window.location.hash.startsWith("#")
+        ? window.location.hash.slice(1)
+        : window.location.hash;
+      const hashParams = new URLSearchParams(hash);
+      const accessToken = hashParams.get("access_token");
+      const refreshToken = hashParams.get("refresh_token");
 
-    supabase.auth.getUser().then(({ data }) => {
+      if (accessToken && refreshToken) {
+        await supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken,
+        });
+        window.history.replaceState({}, "", window.location.pathname);
+      }
+
+      const params = new URLSearchParams(window.location.search);
+      const authError = params.get("auth_error");
+      const { data } = await supabase.auth.getUser();
+
+      if (!data.user && authError) {
+        const messages: Record<string, string> = {
+          missing_code: "Link di conferma non valido. Richiedi una nuova email.",
+          confirm: "Conferma email fallita. Il link potrebbe essere scaduto.",
+          config: "Errore di configurazione. Contatta il team Operations.",
+        };
+        alert(messages[authError] ?? "Errore durante l'autenticazione.");
+        window.history.replaceState({}, "", window.location.pathname);
+      }
+
       if (data.user) {
         setUser(data.user);
+        syncProfileFromMetadata(data.user);
         loadTickets(data.user);
         loadNotifications(data.user);
+        if (accessToken || authError) {
+          window.history.replaceState({}, "", window.location.pathname);
+        }
       } else {
         setUser(null);
         setTickets([]);
         setRole("");
       }
       setAuthLoading(false);
-    });
+    }
+
+    bootstrapAuth();
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.user) {
