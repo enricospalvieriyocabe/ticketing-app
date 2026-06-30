@@ -8,6 +8,14 @@ import { authCallbackUrl } from "@/lib/app-url";
 import { CASE_TYPE_OPTIONS, getCaseTypeLabel } from "@/lib/ticket-classification";
 import { parseTicketContent } from "@/lib/ticket-content";
 
+const PENDING_EMAIL_KEY = "ticketing_pending_confirmation_email";
+const RESEND_COOLDOWN_KEY = "ticketing_resend_cooldown_until";
+
+function getResendCooldownSeconds(until: number): number {
+  if (until <= Date.now()) return 0;
+  return Math.ceil((until - Date.now()) / 1000);
+}
+
 function collapseEmailThreadDuplicates(items: any[]): any[] {
   const byThreadId = new Map<string, any>();
   const withoutThread: any[] = [];
@@ -55,6 +63,9 @@ export default function Home() {
   const [companyName, setCompanyName] = useState("");
   const [authMode, setAuthMode] = useState<"login" | "signup">("login");
   const [pendingConfirmationEmail, setPendingConfirmationEmail] = useState("");
+  const [resendLoading, setResendLoading] = useState(false);
+  const [resendCooldownUntil, setResendCooldownUntil] = useState(0);
+  const [, setResendTick] = useState(0);
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -121,6 +132,45 @@ export default function Home() {
   });
   const notificationRef = useRef<HTMLDivElement>(null);
 
+  function rememberPendingEmail(value: string) {
+    const normalized = value.trim().toLowerCase();
+    setPendingConfirmationEmail(normalized);
+    if (normalized) {
+      sessionStorage.setItem(PENDING_EMAIL_KEY, normalized);
+    } else {
+      sessionStorage.removeItem(PENDING_EMAIL_KEY);
+    }
+  }
+
+  function clearPendingEmail() {
+    rememberPendingEmail("");
+    sessionStorage.removeItem(RESEND_COOLDOWN_KEY);
+    setResendCooldownUntil(0);
+  }
+
+  useEffect(() => {
+    const storedEmail = sessionStorage.getItem(PENDING_EMAIL_KEY);
+    if (storedEmail) {
+      setPendingConfirmationEmail(storedEmail);
+    }
+
+    const storedCooldown = sessionStorage.getItem(RESEND_COOLDOWN_KEY);
+    if (storedCooldown) {
+      const until = Number(storedCooldown);
+      if (!Number.isNaN(until) && until > Date.now()) {
+        setResendCooldownUntil(until);
+      } else {
+        sessionStorage.removeItem(RESEND_COOLDOWN_KEY);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (resendCooldownUntil <= Date.now()) return;
+    const timer = window.setInterval(() => setResendTick((value) => value + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, [resendCooldownUntil]);
+
   useEffect(() => {
     loadAssignableUsers();
 
@@ -155,6 +205,7 @@ export default function Home() {
       }
 
       if (data.user) {
+        clearPendingEmail();
         setUser(data.user);
         syncProfileFromMetadata(data.user);
         loadTickets(data.user);
@@ -174,6 +225,7 @@ export default function Home() {
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.user) {
+        clearPendingEmail();
         setUser(session.user);
         syncProfileFromMetadata(session.user);
         loadTickets(session.user);
@@ -278,7 +330,7 @@ export default function Home() {
       alert(
         "Questa email risulta già registrata. Prova ad accedere oppure usa «Reinvia email di conferma»."
       );
-      setPendingConfirmationEmail(signupEmail);
+      rememberPendingEmail(signupEmail);
       return;
     }
 
@@ -287,12 +339,12 @@ export default function Home() {
       setFirstName("");
       setLastName("");
       setCompanyName("");
-      setPendingConfirmationEmail("");
+      clearPendingEmail();
       alert("Registrazione completata. Puoi accedere.");
       return;
     }
 
-    setPendingConfirmationEmail(signupEmail);
+    rememberPendingEmail(signupEmail);
     setFirstName("");
     setLastName("");
     setCompanyName("");
@@ -302,24 +354,56 @@ export default function Home() {
   }
 
   async function resendConfirmationEmail() {
-    const targetEmail = (pendingConfirmationEmail || email).trim();
+    const targetEmail = (pendingConfirmationEmail || email).trim().toLowerCase();
     if (!targetEmail) {
       alert("Inserisci l'email usata in registrazione");
       return;
     }
 
-    const { error } = await supabase.auth.resend({
-      type: "signup",
-      email: targetEmail,
-      options: { emailRedirectTo: authCallbackUrl() },
-    });
-
-    if (error) {
-      alert(`Reinvio non riuscito: ${error.message}`);
+    const cooldownSeconds = getResendCooldownSeconds(resendCooldownUntil);
+    if (cooldownSeconds > 0) {
+      alert(`Attendi ancora ${cooldownSeconds} secondi prima di richiedere una nuova email.`);
       return;
     }
 
-    alert("Email di conferma reinviata. Controlla anche la cartella spam.");
+    setResendLoading(true);
+    try {
+      const { error } = await supabase.auth.resend({
+        type: "signup",
+        email: targetEmail,
+        options: { emailRedirectTo: authCallbackUrl() },
+      });
+
+      if (error) {
+        const message = error.message.toLowerCase();
+        if (
+          message.includes("60 second") ||
+          message.includes("rate") ||
+          message.includes("security purposes") ||
+          message.includes("too many")
+        ) {
+          const until = Date.now() + 60_000;
+          setResendCooldownUntil(until);
+          sessionStorage.setItem(RESEND_COOLDOWN_KEY, String(until));
+          alert(
+            "Supabase limita i reinvii ravvicinati. Riprova tra circa 60 secondi. Se hai già provato più volte oggi, controlla anche spam: con l'email gratuita di Supabase arrivano al massimo 2 email all'ora."
+          );
+        } else {
+          alert(`Reinvio non riuscito: ${error.message}`);
+        }
+        return;
+      }
+
+      rememberPendingEmail(targetEmail);
+      const until = Date.now() + 60_000;
+      setResendCooldownUntil(until);
+      sessionStorage.setItem(RESEND_COOLDOWN_KEY, String(until));
+      alert(
+        "Richiesta inviata. Controlla la casella (anche spam) nei prossimi 2-3 minuti. Se non arriva nulla, il limite gratuito Supabase potrebbe essere già stato raggiunto (2 email/ora)."
+      );
+    } finally {
+      setResendLoading(false);
+    }
   }
 
   async function signIn() {
@@ -331,6 +415,14 @@ export default function Home() {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
       const message = error.message.toLowerCase();
+      if (message.includes("email not confirmed") || message.includes("not confirmed")) {
+        rememberPendingEmail(email.trim());
+        setAuthMode("signup");
+        alert(
+          "Devi prima confermare l'email. Usa «Reinvia email di conferma» qui sotto, poi clicca il link ricevuto."
+        );
+        return;
+      }
       if (
         message.includes("invalid login credentials") ||
         message.includes("invalid") ||
@@ -2317,18 +2409,33 @@ export default function Home() {
           </button>
         )}
 
-        {authMode === "signup" && pendingConfirmationEmail && (
+        {!user &&
+          (pendingConfirmationEmail || (authMode === "signup" && email.trim())) && (
           <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
             <p className="mb-2">
-              In attesa di conferma per <strong>{pendingConfirmationEmail}</strong>. Controlla anche
-              spam.
+              {pendingConfirmationEmail ? (
+                <>
+                  In attesa di conferma per <strong>{pendingConfirmationEmail}</strong>. Controlla
+                  anche spam.
+                </>
+              ) : (
+                <>
+                  Non hai ricevuto l&apos;email di conferma per <strong>{email.trim()}</strong>?
+                  Puoi richiederne una nuova.
+                </>
+              )}
             </p>
             <button
               type="button"
               onClick={resendConfirmationEmail}
-              className="font-medium text-[#1a6b5c] underline"
+              disabled={resendLoading || getResendCooldownSeconds(resendCooldownUntil) > 0}
+              className="font-medium text-[#1a6b5c] underline disabled:cursor-not-allowed disabled:no-underline disabled:opacity-60"
             >
-              Reinvia email di conferma
+              {resendLoading
+                ? "Invio in corso..."
+                : getResendCooldownSeconds(resendCooldownUntil) > 0
+                  ? `Reinvia email di conferma (${getResendCooldownSeconds(resendCooldownUntil)}s)`
+                  : "Reinvia email di conferma"}
             </button>
           </div>
         )}
