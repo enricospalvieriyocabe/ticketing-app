@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { supabase } from "@/lib/supabase";
+import { syncProfileFromMetadata } from "@/lib/profile-sync";
 
 export default function AuthCallbackPage() {
   const router = useRouter();
@@ -30,6 +31,11 @@ export default function AuthCallbackPage() {
           return;
         }
 
+        const { data: userData } = await supabase.auth.getUser();
+        if (userData.user) {
+          await syncProfileFromMetadata(userData.user);
+        }
+
         router.replace("/");
         return;
       }
@@ -41,6 +47,11 @@ export default function AuthCallbackPage() {
           setMessage("Conferma email fallita.");
           router.replace("/?auth_error=confirm");
           return;
+        }
+
+        const { data: userData } = await supabase.auth.getUser();
+        if (userData.user) {
+          await syncProfileFromMetadata(userData.user);
         }
 
         router.replace("/");

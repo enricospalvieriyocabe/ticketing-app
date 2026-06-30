@@ -5,6 +5,7 @@ import { useEffect, useState, useRef } from "react";
 import Image from "next/image";
 import { supabase } from "../lib/supabase";
 import { authCallbackUrl } from "@/lib/app-url";
+import { syncProfileFromMetadata } from "@/lib/profile-sync";
 import { CASE_TYPE_OPTIONS, getCaseTypeLabel } from "@/lib/ticket-classification";
 import { parseTicketContent } from "@/lib/ticket-content";
 
@@ -269,21 +270,6 @@ export default function Home() {
       document.removeEventListener("mousedown", handleClickOutside);
     };
   }, []);
-
-  async function syncProfileFromMetadata(currentUser: any) {
-    const meta = currentUser.user_metadata ?? {};
-    await supabase.from("profiles").upsert(
-      {
-        id: currentUser.id,
-        email: currentUser.email,
-        first_name: meta.first_name ?? null,
-        last_name: meta.last_name ?? null,
-        full_name: meta.full_name ?? null,
-        company_name: meta.company_name ?? null,
-      },
-      { onConflict: "id" }
-    );
-  }
 
   async function signUp() {
     const first = firstName.trim();
