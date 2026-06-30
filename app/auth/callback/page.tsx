@@ -33,6 +33,19 @@ export default function AuthCallbackPage() {
 
         const { data: userData } = await supabase.auth.getUser();
         if (userData.user) {
+          const meta = userData.user.user_metadata ?? {};
+          await fetch("/api/auth/ensure-profile", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              userId: userData.user.id,
+              email: userData.user.email,
+              first_name: meta.first_name,
+              last_name: meta.last_name,
+              company_name: meta.company_name,
+              role: meta.role,
+            }),
+          });
           await syncProfileFromMetadata(userData.user);
         }
 
@@ -51,6 +64,19 @@ export default function AuthCallbackPage() {
 
         const { data: userData } = await supabase.auth.getUser();
         if (userData.user) {
+          const meta = userData.user.user_metadata ?? {};
+          await fetch("/api/auth/ensure-profile", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              userId: userData.user.id,
+              email: userData.user.email,
+              first_name: meta.first_name,
+              last_name: meta.last_name,
+              company_name: meta.company_name,
+              role: meta.role,
+            }),
+          });
           await syncProfileFromMetadata(userData.user);
         }
 

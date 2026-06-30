@@ -421,7 +421,7 @@ export default function Home() {
       return;
     }
 
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
       const message = error.message.toLowerCase();
       if (message.includes("email not confirmed") || message.includes("not confirmed")) {
@@ -442,6 +442,12 @@ export default function Home() {
         alert(translateAuthError(error.message));
       }
       return;
+    }
+
+    if (data.user && data.session?.access_token) {
+      setUser(data.user);
+      await loadTickets(data.user, data.session.access_token);
+      loadNotifications(data.user);
     }
   }
 
@@ -479,7 +485,7 @@ export default function Home() {
 
     profileAlertShownFor.current = null;
 
-    setRole(profile.role);
+    setRole(String(profile.role ?? ""));
     setCurrentProfile(profile);
 
     let query = supabase.from("tickets").select("*");
