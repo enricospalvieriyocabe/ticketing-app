@@ -12,7 +12,12 @@ export function translateAuthError(message: string): string {
   }
 
   if (text.includes("email rate limit") || text.includes("rate limit exceeded")) {
-    return "Limite email Supabase raggiunto: con il servizio gratuito arrivano al massimo 2 email all'ora per indirizzo. Attendi circa 1 ora oppure controlla spam per le email già inviate.";
+    return (
+      "Limite email Supabase raggiunto sul progetto: con il servizio gratuito integrato " +
+      "partono al massimo 2 email all'ora in totale (tutti gli indirizzi). " +
+      "Attendi circa 1 ora dall'ultimo tentativo, controlla spam, oppure conferma l'utente " +
+      "manualmente da Supabase → Authentication → Users."
+    );
   }
 
   if (text.includes("too many requests")) {

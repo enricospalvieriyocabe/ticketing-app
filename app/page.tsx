@@ -334,6 +334,14 @@ export default function Home() {
     setLastName("");
     setCompanyName("");
     applyResendCooldown(Date.now() + 60_000);
+
+    if (payload.emailSkipped && payload.warning) {
+      alert(
+        `${payload.warning}\n\nNome e azienda sono già salvati in profiles. Dopo la conferma manuale puoi fare login.`
+      );
+      return;
+    }
+
     alert(
       "Registrazione avviata. Nome e azienda sono già salvati nel profilo. Controlla la casella email (anche spam) per confermare l'account. La prima email è già stata inviata: usa «Reinvia email di conferma» solo dopo 60 secondi se non arriva nulla."
     );
@@ -377,7 +385,7 @@ export default function Home() {
       rememberPendingEmail(targetEmail);
       applyResendCooldown(Date.now() + 60_000);
       alert(
-        "Richiesta inviata. Controlla la casella (anche spam) nei prossimi 2-3 minuti. Ricorda: con l'email gratuita di Supabase puoi ricevere al massimo 2 email all'ora."
+        "Richiesta inviata. Controlla la casella (anche spam) nei prossimi 2-3 minuti. Ricorda: con l'email gratuita di Supabase partono al massimo 2 email all'ora per tutto il progetto."
       );
     } finally {
       setResendLoading(false);

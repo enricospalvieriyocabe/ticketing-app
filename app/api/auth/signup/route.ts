@@ -53,6 +53,52 @@ export async function POST(request: Request) {
     });
 
     if (error) {
+      const message = error.message.toLowerCase();
+      const rateLimited =
+        message.includes("email rate limit") || message.includes("rate limit exceeded");
+
+      if (rateLimited) {
+        const { data: existingProfile } = await admin
+          .from("profiles")
+          .select("id, email")
+          .eq("email", email)
+          .maybeSingle();
+
+        let userId = existingProfile?.id ?? null;
+
+        if (!userId) {
+          const { data: listed } = await admin.auth.admin.listUsers({ perPage: 200 });
+          const existingUser = listed.users.find(
+            (user) => user.email?.toLowerCase() === email
+          );
+          userId = existingUser?.id ?? null;
+        }
+
+        if (userId) {
+          await admin.from("profiles").upsert(
+            {
+              id: userId,
+              email,
+              first_name: firstName,
+              last_name: lastName,
+              full_name: fullName,
+              company_name: companyName,
+              role: "user",
+            },
+            { onConflict: "id" }
+          );
+
+          return NextResponse.json({
+            status: "pending_confirmation",
+            email,
+            userId,
+            emailSkipped: true,
+            warning:
+              "Account creato ma email di conferma non inviata per limite Supabase. Conferma manualmente l'utente in Authentication → Users.",
+          });
+        }
+      }
+
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
