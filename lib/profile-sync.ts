@@ -150,26 +150,3 @@ export async function syncProfileFromMetadata(currentUser: AuthUserLike) {
 
   return { error: upsertError ?? rpcError };
 }
-
-export async function fetchCurrentUserProfile(currentUser: AuthUserLike) {
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("*")
-    .eq("id", currentUser.id)
-    .maybeSingle();
-
-  if (profile) return profile;
-
-  const { data: sessionData } = await supabase.auth.getSession();
-  const token = sessionData.session?.access_token;
-  if (!token) return null;
-
-  const response = await fetch("/api/auth/profile", {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-
-  if (!response.ok) return null;
-
-  const payload = await response.json().catch(() => ({}));
-  return payload.profile ?? null;
-}
