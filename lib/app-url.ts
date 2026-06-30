@@ -23,3 +23,7 @@ export function getAppUrl(): string {
 export function authCallbackUrl(): string {
   return `${getAppUrl()}/auth/callback`;
 }
+
+export function resetPasswordUrl(): string {
+  return `${getAppUrl()}/auth/reset-password`;
+}

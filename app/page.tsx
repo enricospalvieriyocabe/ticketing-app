@@ -4,9 +4,9 @@
 import { useEffect, useState, useRef } from "react";
 import Image from "next/image";
 import { supabase } from "../lib/supabase";
-import { authCallbackUrl } from "@/lib/app-url";
+import { authCallbackUrl, resetPasswordUrl } from "@/lib/app-url";
 import { parseResendCooldownMs, translateAuthError } from "@/lib/auth-errors";
-import { rememberSignupDraft, syncProfileFromMetadata } from "@/lib/profile-sync";
+import { syncProfileFromMetadata } from "@/lib/profile-sync";
 import { CASE_TYPE_OPTIONS, getCaseTypeLabel } from "@/lib/ticket-classification";
 import { parseTicketContent } from "@/lib/ticket-content";
 
@@ -276,7 +276,6 @@ export default function Home() {
     const first = firstName.trim();
     const last = lastName.trim();
     const company = companyName.trim();
-    const full = `${first} ${last}`.trim();
     const signupEmail = email.trim();
 
     if (!first || !last) {
@@ -294,42 +293,34 @@ export default function Home() {
       return;
     }
 
-    const { data, error } = await supabase.auth.signUp({
-      email: signupEmail,
-      password,
-      options: {
-        emailRedirectTo: authCallbackUrl(),
-        data: {
-          first_name: first,
-          last_name: last,
-          full_name: full,
-          company_name: company,
-        },
-      },
+    const response = await fetch("/api/auth/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: signupEmail,
+        password,
+        first_name: first,
+        last_name: last,
+        company_name: company,
+      }),
     });
 
-    if (error) {
-      alert(translateAuthError(error.message));
+    const payload = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      if (payload.error === "already_registered") {
+        alert(
+          "Questa email risulta già registrata. Prova ad accedere oppure usa «Reinvia email di conferma»."
+        );
+        rememberPendingEmail(signupEmail);
+        return;
+      }
+
+      alert(translateAuthError(String(payload.error ?? "Registrazione non riuscita")));
       return;
     }
 
-    rememberSignupDraft({
-      email: signupEmail.toLowerCase(),
-      first_name: first,
-      last_name: last,
-      company_name: company,
-    });
-
-    if (data.user?.identities?.length === 0) {
-      alert(
-        "Questa email risulta già registrata. Prova ad accedere oppure usa «Reinvia email di conferma»."
-      );
-      rememberPendingEmail(signupEmail);
-      return;
-    }
-
-    if (data.user?.id && data.session) {
-      await syncProfileFromMetadata(data.user);
+    if (payload.status === "complete") {
       setFirstName("");
       setLastName("");
       setCompanyName("");
@@ -342,11 +333,9 @@ export default function Home() {
     setFirstName("");
     setLastName("");
     setCompanyName("");
-    const until = Date.now() + 60_000;
-    setResendCooldownUntil(until);
-    sessionStorage.setItem(RESEND_COOLDOWN_KEY, String(until));
+    applyResendCooldown(Date.now() + 60_000);
     alert(
-      "Registrazione avviata. Controlla la casella email (anche spam) per confermare l'account. La prima email è già stata inviata: usa «Reinvia email di conferma» solo dopo 60 secondi se non arriva nulla."
+      "Registrazione avviata. Nome e azienda sono già salvati nel profilo. Controlla la casella email (anche spam) per confermare l'account. La prima email è già stata inviata: usa «Reinvia email di conferma» solo dopo 60 secondi se non arriva nulla."
     );
   }
 
@@ -393,6 +382,27 @@ export default function Home() {
     } finally {
       setResendLoading(false);
     }
+  }
+
+  async function requestPasswordReset() {
+    const targetEmail = email.trim().toLowerCase();
+    if (!targetEmail) {
+      alert("Inserisci l'email dell'account per recuperare la password.");
+      return;
+    }
+
+    const { error } = await supabase.auth.resetPasswordForEmail(targetEmail, {
+      redirectTo: resetPasswordUrl(),
+    });
+
+    if (error) {
+      alert(translateAuthError(error.message));
+      return;
+    }
+
+    alert(
+      "Email di recupero password inviata. Controlla la casella (anche spam) e segui il link per impostare una nuova password."
+    );
   }
 
   async function signIn() {
@@ -2384,9 +2394,21 @@ export default function Home() {
         />
 
         {authMode === "login" && (
-          <button onClick={signIn} className="yocabe-btn-primary mb-3 w-full rounded-lg p-2.5 font-medium">
-            Accedi
-          </button>
+          <>
+            <button
+              onClick={signIn}
+              className="yocabe-btn-primary mb-3 w-full rounded-lg p-2.5 font-medium"
+            >
+              Accedi
+            </button>
+            <button
+              type="button"
+              onClick={requestPasswordReset}
+              className="w-full text-sm font-medium text-[#1a6b5c] underline"
+            >
+              Password dimenticata?
+            </button>
+          </>
         )}
 
         {authMode === "signup" && (

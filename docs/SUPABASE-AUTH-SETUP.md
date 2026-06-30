@@ -28,6 +28,8 @@ NEXT_PUBLIC_APP_URL=https://ticketing-yocabe.app
 | | `https://ticketing-yocabe.app/auth/callback` |
 | | `https://ticketing-yocabe.vercel.app/**` |
 | | `https://ticketing-yocabe.vercel.app/auth/callback` |
+| | `https://ticketing-yocabe.app/auth/reset-password` |
+| | `https://ticketing-yocabe.vercel.app/auth/reset-password` |
 | | `https://ticketing-app-ashen.vercel.app/**` (legacy, temporaneo) |
 
 **Save**
