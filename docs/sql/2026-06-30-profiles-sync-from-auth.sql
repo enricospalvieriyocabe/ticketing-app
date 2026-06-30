@@ -1,5 +1,5 @@
--- Copia nome/azienda da auth.users → profiles alla registrazione
--- e ripristina profili già creati senza quei campi.
+-- Esegui questo script su Supabase SQL Editor (una tantum).
+-- Copia nome/azienda da auth.users → profiles e abilita sync lato server.
 
 create or replace function public.handle_new_user()
 returns trigger
@@ -44,7 +44,48 @@ create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
 
--- Ripristina profili incompleti già esistenti (es. registrazione con conferma email)
+create or replace function public.sync_profile_from_auth()
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  uid uuid := auth.uid();
+  meta jsonb;
+begin
+  if uid is null then
+    raise exception 'not authenticated';
+  end if;
+
+  select raw_user_meta_data into meta
+  from auth.users
+  where id = uid;
+
+  update public.profiles
+  set
+    first_name = coalesce(nullif(meta->>'first_name', ''), first_name),
+    last_name = coalesce(nullif(meta->>'last_name', ''), last_name),
+    full_name = coalesce(
+      nullif(meta->>'full_name', ''),
+      nullif(
+        trim(concat(
+          coalesce(meta->>'first_name', ''),
+          ' ',
+          coalesce(meta->>'last_name', '')
+        )),
+        ''
+      ),
+      full_name
+    ),
+    company_name = coalesce(nullif(meta->>'company_name', ''), company_name)
+  where id = uid;
+end;
+$$;
+
+grant execute on function public.sync_profile_from_auth() to authenticated;
+
+-- Ripristina profili incompleti già esistenti
 update public.profiles p
 set
   first_name = coalesce(nullif(u.raw_user_meta_data->>'first_name', ''), p.first_name),

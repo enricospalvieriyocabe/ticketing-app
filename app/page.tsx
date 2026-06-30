@@ -5,7 +5,8 @@ import { useEffect, useState, useRef } from "react";
 import Image from "next/image";
 import { supabase } from "../lib/supabase";
 import { authCallbackUrl } from "@/lib/app-url";
-import { syncProfileFromMetadata } from "@/lib/profile-sync";
+import { parseResendCooldownMs, translateAuthError } from "@/lib/auth-errors";
+import { rememberSignupDraft, syncProfileFromMetadata } from "@/lib/profile-sync";
 import { CASE_TYPE_OPTIONS, getCaseTypeLabel } from "@/lib/ticket-classification";
 import { parseTicketContent } from "@/lib/ticket-content";
 
@@ -308,9 +309,16 @@ export default function Home() {
     });
 
     if (error) {
-      alert(error.message);
+      alert(translateAuthError(error.message));
       return;
     }
+
+    rememberSignupDraft({
+      email: signupEmail.toLowerCase(),
+      first_name: first,
+      last_name: last,
+      company_name: company,
+    });
 
     if (data.user?.identities?.length === 0) {
       alert(
@@ -334,9 +342,17 @@ export default function Home() {
     setFirstName("");
     setLastName("");
     setCompanyName("");
+    const until = Date.now() + 60_000;
+    setResendCooldownUntil(until);
+    sessionStorage.setItem(RESEND_COOLDOWN_KEY, String(until));
     alert(
-      "Registrazione avviata. Controlla la casella email (anche spam) per confermare l'account. Se non arriva nulla entro 5 minuti, clicca «Reinvia email di conferma»."
+      "Registrazione avviata. Controlla la casella email (anche spam) per confermare l'account. La prima email è già stata inviata: usa «Reinvia email di conferma» solo dopo 60 secondi se non arriva nulla."
     );
+  }
+
+  function applyResendCooldown(until: number) {
+    setResendCooldownUntil(until);
+    sessionStorage.setItem(RESEND_COOLDOWN_KEY, String(until));
   }
 
   async function resendConfirmationEmail() {
@@ -361,31 +377,18 @@ export default function Home() {
       });
 
       if (error) {
-        const message = error.message.toLowerCase();
-        if (
-          message.includes("60 second") ||
-          message.includes("rate") ||
-          message.includes("security purposes") ||
-          message.includes("too many")
-        ) {
-          const until = Date.now() + 60_000;
-          setResendCooldownUntil(until);
-          sessionStorage.setItem(RESEND_COOLDOWN_KEY, String(until));
-          alert(
-            "Supabase limita i reinvii ravvicinati. Riprova tra circa 60 secondi. Se hai già provato più volte oggi, controlla anche spam: con l'email gratuita di Supabase arrivano al massimo 2 email all'ora."
-          );
-        } else {
-          alert(`Reinvio non riuscito: ${error.message}`);
+        const cooldownMs = parseResendCooldownMs(error.message);
+        if (cooldownMs) {
+          applyResendCooldown(Date.now() + cooldownMs);
         }
+        alert(translateAuthError(error.message));
         return;
       }
 
       rememberPendingEmail(targetEmail);
-      const until = Date.now() + 60_000;
-      setResendCooldownUntil(until);
-      sessionStorage.setItem(RESEND_COOLDOWN_KEY, String(until));
+      applyResendCooldown(Date.now() + 60_000);
       alert(
-        "Richiesta inviata. Controlla la casella (anche spam) nei prossimi 2-3 minuti. Se non arriva nulla, il limite gratuito Supabase potrebbe essere già stato raggiunto (2 email/ora)."
+        "Richiesta inviata. Controlla la casella (anche spam) nei prossimi 2-3 minuti. Ricorda: con l'email gratuita di Supabase puoi ricevere al massimo 2 email all'ora."
       );
     } finally {
       setResendLoading(false);
@@ -416,7 +419,7 @@ export default function Home() {
       ) {
         alert("Credenziali non valide. Controlla email e password.");
       } else {
-        alert(error.message);
+        alert(translateAuthError(error.message));
       }
       return;
     }
@@ -2401,8 +2404,8 @@ export default function Home() {
             <p className="mb-2">
               {pendingConfirmationEmail ? (
                 <>
-                  In attesa di conferma per <strong>{pendingConfirmationEmail}</strong>. Controlla
-                  anche spam.
+                  In attesa di conferma per <strong>{pendingConfirmationEmail}</strong>. La prima email
+                  parte subito alla registrazione: controlla anche spam prima di reinviare.
                 </>
               ) : (
                 <>
