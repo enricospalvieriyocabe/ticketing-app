@@ -61,6 +61,10 @@ function buildProfilePayload(currentUser: AuthUserLike) {
   const payload: Record<string, string | null> = {
     id: currentUser.id,
     email: currentUser.email ?? null,
+    role:
+      (typeof meta.role === "string" && meta.role.trim()) ||
+      (typeof meta.app_role === "string" && meta.app_role.trim()) ||
+      "user",
   };
 
   if (firstName) payload.first_name = firstName;
@@ -71,17 +75,40 @@ function buildProfilePayload(currentUser: AuthUserLike) {
   return payload;
 }
 
+export async function ensureUserProfile(currentUser: AuthUserLike) {
+  await supabase.auth.refreshSession();
+  const { data: refreshed } = await supabase.auth.getUser();
+  const user = refreshed.user ?? currentUser;
+  const payload = buildProfilePayload(user);
+
+  const { error: rpcError } = await supabase.rpc("sync_profile_from_auth");
+  if (!rpcError) {
+    clearSignupDraft();
+    return { error: null };
+  }
+
+  const { error: upsertError } = await supabase
+    .from("profiles")
+    .upsert(payload, { onConflict: "id" });
+
+  if (!upsertError) {
+    clearSignupDraft();
+  }
+
+  return { error: upsertError ?? rpcError };
+}
+
 export async function syncProfileFromMetadata(currentUser: AuthUserLike) {
   await supabase.auth.refreshSession();
   const { data: refreshed } = await supabase.auth.getUser();
   const user = refreshed.user ?? currentUser;
 
   const payload = buildProfilePayload(user);
-  const hasProfileFields =
+  const hasExtraProfileFields =
     payload.first_name || payload.last_name || payload.full_name || payload.company_name;
 
-  if (!hasProfileFields) {
-    return { error: null };
+  if (!hasExtraProfileFields) {
+    return ensureUserProfile(currentUser);
   }
 
   const { error: rpcError } = await supabase.rpc("sync_profile_from_auth");

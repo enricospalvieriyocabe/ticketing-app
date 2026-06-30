@@ -6,7 +6,7 @@ import Image from "next/image";
 import { supabase } from "../lib/supabase";
 import { authCallbackUrl, resetPasswordUrl } from "@/lib/app-url";
 import { parseResendCooldownMs, translateAuthError } from "@/lib/auth-errors";
-import { syncProfileFromMetadata } from "@/lib/profile-sync";
+import { ensureUserProfile, syncProfileFromMetadata } from "@/lib/profile-sync";
 import { CASE_TYPE_OPTIONS, getCaseTypeLabel } from "@/lib/ticket-classification";
 import { parseTicketContent } from "@/lib/ticket-content";
 
@@ -467,14 +467,53 @@ export default function Home() {
   }
 
   async function loadTickets(currentUser: any) {
-    const { data: profile } = await supabase
+    let { data: profile } = await supabase
       .from("profiles")
       .select("*")
       .eq("id", currentUser.id)
-      .single();
+      .maybeSingle();
 
     if (!profile) {
-      alert("Profilo non trovato");
+      await ensureUserProfile(currentUser);
+
+      const retry = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", currentUser.id)
+        .maybeSingle();
+
+      profile = retry.data;
+
+      if (!profile) {
+        const meta = currentUser.user_metadata ?? {};
+        const response = await fetch("/api/auth/ensure-profile", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId: currentUser.id,
+            email: currentUser.email,
+            first_name: meta.first_name,
+            last_name: meta.last_name,
+            company_name: meta.company_name,
+            role: meta.role,
+          }),
+        });
+
+        if (response.ok) {
+          const finalRetry = await supabase
+            .from("profiles")
+            .select("*")
+            .eq("id", currentUser.id)
+            .maybeSingle();
+          profile = finalRetry.data;
+        }
+      }
+    }
+
+    if (!profile) {
+      alert(
+        "Profilo non trovato. Su Supabase aggiungi una riga in profiles collegata a questo utente, oppure riprova tra qualche secondo."
+      );
       return;
     }
 
