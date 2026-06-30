@@ -2142,12 +2142,12 @@ export default function Home() {
           <Image
             src="/logo-ticketing-auth.png"
             alt="Yocabè"
-            width={800}
-            height={200}
-            className="mx-auto h-36 w-auto max-w-[min(100%,420px)] object-contain"
+            width={400}
+            height={100}
+            className="mx-auto h-18 w-auto max-w-[min(100%,210px)] object-contain"
             priority
           />
-          <p className="mt-4 text-base font-semibold tracking-wide text-white">Ticketing</p>
+          <p className="mt-4 text-xl font-semibold tracking-wide text-white">Ticketing</p>
         </div>
 
         <div className="p-6">
