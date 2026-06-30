@@ -11,18 +11,31 @@ create policy "profiles_select_own"
   using (auth.uid() = id);
 
 drop policy if exists "profiles_select_staff" on public.profiles;
+drop function if exists public.is_staff_user();
+
+create or replace function public.is_staff_user()
+returns boolean
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select exists (
+    select 1
+    from public.profiles
+    where id = auth.uid()
+      and role in ('operator', 'team_leader')
+  );
+$$;
+
+revoke all on function public.is_staff_user() from public;
+grant execute on function public.is_staff_user() to authenticated;
+
 create policy "profiles_select_staff"
   on public.profiles
   for select
   to authenticated
-  using (
-    exists (
-      select 1
-      from public.profiles me
-      where me.id = auth.uid()
-        and me.role in ('operator', 'team_leader')
-    )
-  );
+  using (public.is_staff_user());
 
 drop policy if exists "profiles_insert_own" on public.profiles;
 create policy "profiles_insert_own"
