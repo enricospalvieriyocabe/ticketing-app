@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import Link from "next/link";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import Image from "next/image";
 import { supabase } from "../lib/supabase";
 import { authCallbackUrl, resetPasswordUrl } from "@/lib/app-url";
@@ -19,6 +19,7 @@ import {
   getCategoryFormTemplate,
   validateCategoryTicketForm,
 } from "@/lib/ticket-form-templates";
+import { ticketMatchesSearchQuery } from "@/lib/ticket-search";
 import { useTicketConfig } from "@/lib/use-ticket-config";
 import { parseTicketContent } from "@/lib/ticket-content";
 
@@ -108,6 +109,11 @@ export default function Home() {
   const [filterCategory, setFilterCategory] = useState("all");
   const [filterPriority, setFilterPriority] = useState("all");
   const [filterCaseType, setFilterCaseType] = useState("all");
+  const [filterAssignedTo, setFilterAssignedTo] = useState("all");
+  const [filterOpenedBy, setFilterOpenedBy] = useState("all");
+  const [filterCompany, setFilterCompany] = useState("all");
+  const [filterSearchQuery, setFilterSearchQuery] = useState("");
+  const [showFilters, setShowFilters] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [handoffNote, setHandoffNote] = useState("");
   const [kpiStartDate, setKpiStartDate] = useState(() => {
@@ -1426,7 +1432,7 @@ export default function Home() {
   const filteredTickets = tickets.filter((t) => {
     const matchCategory =
       filterCategory === "all" || t.category === filterCategory;
-  
+
     const matchPriority =
       filterPriority === "all" || t.priority === filterPriority;
 
@@ -1436,9 +1442,95 @@ export default function Home() {
         : filterCaseType === "unclassified"
         ? !t.case_type
         : t.case_type === filterCaseType;
-  
-    return matchCategory && matchPriority && matchCaseType;
+
+    const matchAssigned =
+      filterAssignedTo === "all" ||
+      (filterAssignedTo === "unassigned" && !t.assigned_to) ||
+      t.assigned_to === filterAssignedTo;
+
+    const openerId = t.requester_id || t.created_by;
+    const matchOpenedBy =
+      filterOpenedBy === "all" || openerId === filterOpenedBy;
+
+    const openerCompany = openerId ? profileCompanyById[openerId] ?? "" : "";
+    const matchCompany =
+      filterCompany === "all" ||
+      (filterCompany === "none" && !openerCompany) ||
+      openerCompany === filterCompany;
+
+    const matchSearch = ticketMatchesSearchQuery(t, filterSearchQuery);
+
+    return (
+      matchCategory &&
+      matchPriority &&
+      matchCaseType &&
+      matchAssigned &&
+      matchOpenedBy &&
+      matchCompany &&
+      matchSearch
+    );
   });
+
+  const assigneeFilterOptions = useMemo(() => {
+    const byId = new Map<string, string>();
+    for (const person of assignableUsers) {
+      byId.set(person.id, getProfileDisplayName(person));
+    }
+    for (const ticket of tickets) {
+      if (ticket.assigned_to && !byId.has(ticket.assigned_to)) {
+        byId.set(
+          ticket.assigned_to,
+          profileNameById[ticket.assigned_to] || "Utente"
+        );
+      }
+    }
+    return Array.from(byId.entries())
+      .map(([id, label]) => ({ id, label }))
+      .sort((a, b) => a.label.localeCompare(b.label, "it"));
+  }, [assignableUsers, tickets, profileNameById]);
+
+  const openerFilterOptions = useMemo(() => {
+    const byId = new Map<string, string>();
+    for (const ticket of tickets) {
+      const id = ticket.requester_id || ticket.created_by;
+      if (id && !byId.has(id)) {
+        byId.set(id, profileNameById[id] || "Utente");
+      }
+    }
+    return Array.from(byId.entries())
+      .map(([id, label]) => ({ id, label }))
+      .sort((a, b) => a.label.localeCompare(b.label, "it"));
+  }, [tickets, profileNameById]);
+
+  const companyFilterOptions = useMemo(() => {
+    const companies = new Set<string>();
+    for (const ticket of tickets) {
+      const id = ticket.requester_id || ticket.created_by;
+      const company = id ? profileCompanyById[id] : "";
+      if (company) companies.add(company);
+    }
+    return Array.from(companies).sort((a, b) => a.localeCompare(b, "it"));
+  }, [tickets, profileCompanyById]);
+
+  const activeFilterCount = [
+    filterCategory !== "all",
+    filterPriority !== "all",
+    filterCaseType !== "all",
+    filterAssignedTo !== "all",
+    filterOpenedBy !== "all",
+    filterCompany !== "all",
+    filterSearchQuery.trim() !== "",
+  ].filter(Boolean).length;
+
+  function resetTicketFilters() {
+    setFilterCategory("all");
+    setFilterPriority("all");
+    setFilterCaseType("all");
+    setFilterAssignedTo("all");
+    setFilterOpenedBy("all");
+    setFilterCompany("all");
+    setFilterSearchQuery("");
+  }
   
   const assignedTickets = sortTicketsOldestFirst(
     filteredTickets.filter((t) => t.status === "assigned")
@@ -1671,7 +1763,140 @@ export default function Home() {
                 {showSlaManager ? "Nascondi SLA" : "SLA"}
               </button>
             )}
+            <button
+              onClick={() => setShowFilters(!showFilters)}
+              className="ml-3 rounded border border-black bg-white px-4 py-2 text-black"
+            >
+              {showFilters ? "Chiudi filtri" : "Filtri"}
+              {activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
+            </button>
           </div>
+
+          {showFilters && (
+            <div className="mb-6 rounded border bg-gray-50 p-4">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <h2 className="text-lg font-bold text-black">Filtri ticket</h2>
+                {activeFilterCount > 0 && (
+                  <button
+                    onClick={resetTicketFilters}
+                    className="rounded border border-gray-400 px-3 py-1 text-sm text-black"
+                  >
+                    Azzera filtri
+                  </button>
+                )}
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                <label className="block text-sm text-black md:col-span-2 lg:col-span-3">
+                  <span className="mb-1 block font-semibold">Ricerca libera</span>
+                  <input
+                    className="w-full rounded border p-2 text-black"
+                    placeholder="Cerca in titolo, descrizione, ordine, spedizione, documenti..."
+                    value={filterSearchQuery}
+                    onChange={(e) => setFilterSearchQuery(e.target.value)}
+                  />
+                </label>
+
+                <label className="block text-sm text-black">
+                  <span className="mb-1 block font-semibold">Categoria</span>
+                  <select
+                    className="w-full rounded border p-2 text-black"
+                    value={filterCategory}
+                    onChange={(e) => setFilterCategory(e.target.value)}
+                  >
+                    <option value="all">Tutte le categorie</option>
+                    {activeCategories.map((item) => (
+                      <option key={item.code} value={item.code}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="block text-sm text-black">
+                  <span className="mb-1 block font-semibold">Priorità</span>
+                  <select
+                    className="w-full rounded border p-2 text-black"
+                    value={filterPriority}
+                    onChange={(e) => setFilterPriority(e.target.value)}
+                  >
+                    <option value="all">Tutte le priorità</option>
+                    <option value="low">Bassa</option>
+                    <option value="medium">Media</option>
+                    <option value="high">Alta</option>
+                    <option value="urgent">Urgente</option>
+                  </select>
+                </label>
+
+                <label className="block text-sm text-black">
+                  <span className="mb-1 block font-semibold">Casistica</span>
+                  <select
+                    className="w-full rounded border p-2 text-black"
+                    value={filterCaseType}
+                    onChange={(e) => setFilterCaseType(e.target.value)}
+                  >
+                    <option value="all">Tutte le casistiche</option>
+                    <option value="unclassified">Non classificati</option>
+                    {activeCaseTypes.map((option) => (
+                      <option key={option.code} value={option.code}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="block text-sm text-black">
+                  <span className="mb-1 block font-semibold">Assegnato a</span>
+                  <select
+                    className="w-full rounded border p-2 text-black"
+                    value={filterAssignedTo}
+                    onChange={(e) => setFilterAssignedTo(e.target.value)}
+                  >
+                    <option value="all">Tutti</option>
+                    <option value="unassigned">Non assegnati</option>
+                    {assigneeFilterOptions.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="block text-sm text-black">
+                  <span className="mb-1 block font-semibold">Aperto da</span>
+                  <select
+                    className="w-full rounded border p-2 text-black"
+                    value={filterOpenedBy}
+                    onChange={(e) => setFilterOpenedBy(e.target.value)}
+                  >
+                    <option value="all">Tutti</option>
+                    {openerFilterOptions.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="block text-sm text-black">
+                  <span className="mb-1 block font-semibold">Azienda</span>
+                  <select
+                    className="w-full rounded border p-2 text-black"
+                    value={filterCompany}
+                    onChange={(e) => setFilterCompany(e.target.value)}
+                  >
+                    <option value="all">Tutte le aziende</option>
+                    <option value="none">Senza azienda</option>
+                    {companyFilterOptions.map((company) => (
+                      <option key={company} value={company}>
+                        {company}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            </div>
+          )}
 
           {showCreateForm && (
             <div className="mb-6 rounded border p-4">
@@ -2306,46 +2531,6 @@ export default function Home() {
               )}
             </div>
           )}
-
-          <div className="mb-6 flex flex-wrap gap-4">
-            <select
-              className="min-w-0 rounded border p-2 text-black md:w-52"
-              value={filterCategory}
-              onChange={(e) => setFilterCategory(e.target.value)}
-            >
-              <option value="all">Tutte le categorie</option>
-              {activeCategories.map((item) => (
-                <option key={item.code} value={item.code}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-
-            <select
-              className="min-w-0 rounded border p-2 text-black md:w-52"
-              value={filterPriority}
-              onChange={(e) => setFilterPriority(e.target.value)}
-            >
-              <option value="all">Tutte le priorità</option>
-              <option value="low">Bassa</option>
-              <option value="medium">Media</option>
-              <option value="high">Alta</option>
-              <option value="urgent">Urgente</option>
-            </select>
-            <select
-              className="min-w-0 w-full rounded border p-2 text-black md:w-80"
-              value={filterCaseType}
-              onChange={(e) => setFilterCaseType(e.target.value)}
-            >
-              <option value="all">Tutte le casistiche</option>
-              <option value="unclassified">Non classificati</option>
-              {activeCaseTypes.map((option) => (
-                <option key={option.code} value={option.code}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
 
         <div className="mb-6 space-y-6">
             <div>
