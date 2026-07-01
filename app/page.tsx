@@ -66,6 +66,14 @@ function collapseEmailThreadDuplicates(items: any[]): any[] {
   });
 }
 
+function sortTicketsOldestFirst<T extends { created_at?: string | null }>(items: T[]): T[] {
+  return [...items].sort((a, b) => {
+    const aCreatedAt = new Date(a.created_at ?? 0).getTime();
+    const bCreatedAt = new Date(b.created_at ?? 0).getTime();
+    return aCreatedAt - bCreatedAt;
+  });
+}
+
 export default function Home() {
   const { categories, caseTypes } = useTicketConfig();
   const activeCategories = activeConfigItems(categories);
@@ -1426,24 +1434,24 @@ export default function Home() {
     return matchCategory && matchPriority && matchCaseType;
   });
   
-  const assignedTickets = filteredTickets.filter(
-    (t) => t.status === "assigned"
+  const assignedTickets = sortTicketsOldestFirst(
+    filteredTickets.filter((t) => t.status === "assigned")
   );
-  
-  const inProgressTickets = filteredTickets.filter(
-    (t) => t.status === "in_progress"
+
+  const inProgressTickets = sortTicketsOldestFirst(
+    filteredTickets.filter((t) => t.status === "in_progress")
   );
-  
-  const waitingTickets = filteredTickets.filter(
-    (t) => t.status === "waiting"
+
+  const waitingTickets = sortTicketsOldestFirst(
+    filteredTickets.filter((t) => t.status === "waiting")
   );
-  
-  const unassignedTickets = filteredTickets.filter(
-    (t) => !t.assigned_to && t.status !== "closed"
+
+  const unassignedTickets = sortTicketsOldestFirst(
+    filteredTickets.filter((t) => !t.assigned_to && t.status !== "closed")
   );
-  
-  const closedTickets = filteredTickets.filter(
-    (t) => t.status === "closed"
+
+  const closedTickets = sortTicketsOldestFirst(
+    filteredTickets.filter((t) => t.status === "closed")
   );
 
   const nowMs = Date.now();
