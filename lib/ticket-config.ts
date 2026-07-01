@@ -4,6 +4,8 @@ export type TicketConfigItem = {
   label: string;
   sort_order: number;
   is_active: boolean;
+  ticket_count?: number;
+  policy_count?: number;
 };
 
 export const DEFAULT_TICKET_CATEGORIES: TicketConfigItem[] = [

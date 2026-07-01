@@ -3,6 +3,10 @@ import { NextResponse } from "next/server";
 import { getAuthUserFromRequest } from "@/lib/api-auth";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import {
+  enrichCaseTypesWithUsage,
+  enrichCategoriesWithUsage,
+} from "@/lib/ticket-config-usage";
+import {
   DEFAULT_CASE_TYPES,
   DEFAULT_TICKET_CATEGORIES,
   type TicketConfigItem,
@@ -69,9 +73,19 @@ export async function GET(request: Request) {
       );
     }
 
+    let mappedCategories = mapRows(categories as TicketConfigItem[]);
+    let mappedCaseTypes = mapRows(caseTypes as TicketConfigItem[]);
+
+    if (role === "team_leader") {
+      [mappedCategories, mappedCaseTypes] = await Promise.all([
+        enrichCategoriesWithUsage(admin, mappedCategories),
+        enrichCaseTypesWithUsage(admin, mappedCaseTypes),
+      ]);
+    }
+
     return NextResponse.json({
-      categories: mapRows(categories as TicketConfigItem[]),
-      caseTypes: mapRows(caseTypes as TicketConfigItem[]),
+      categories: mappedCategories,
+      caseTypes: mappedCaseTypes,
       fallback: false,
       role,
     });

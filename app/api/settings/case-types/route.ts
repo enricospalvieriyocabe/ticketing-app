@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { requireTeamLeader } from "@/lib/api-auth";
 import { slugifyConfigCode } from "@/lib/ticket-config";
+import { getCaseTypeUsage } from "@/lib/ticket-config-usage";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
 type CaseTypeBody = {
@@ -102,6 +103,52 @@ export async function PATCH(request: Request) {
     }
 
     return NextResponse.json({ item: data });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Errore imprevisto";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const auth = await requireTeamLeader(request);
+    if (auth.error) {
+      return NextResponse.json({ error: auth.error }, { status: auth.status });
+    }
+
+    const id = new URL(request.url).searchParams.get("id")?.trim();
+    if (!id) {
+      return NextResponse.json({ error: "Casistica non valida" }, { status: 400 });
+    }
+
+    const admin = getSupabaseAdmin();
+    const { data: existing, error: loadError } = await admin
+      .from("ticket_case_types")
+      .select("id, code, label")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (loadError || !existing) {
+      return NextResponse.json({ error: "Casistica non trovata" }, { status: 404 });
+    }
+
+    const { ticket_count } = await getCaseTypeUsage(admin, existing.code);
+    if (ticket_count > 0) {
+      return NextResponse.json(
+        {
+          error: `Impossibile eliminare: usata in ${ticket_count} ticket.`,
+          ticket_count,
+        },
+        { status: 409 }
+      );
+    }
+
+    const { error } = await admin.from("ticket_case_types").delete().eq("id", id);
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ ok: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Errore imprevisto";
     return NextResponse.json({ error: message }, { status: 500 });

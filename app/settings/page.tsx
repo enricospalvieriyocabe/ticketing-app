@@ -27,18 +27,40 @@ async function authFetch(path: string, init?: RequestInit) {
   });
 }
 
+function formatUsage(item: TicketConfigItem, kind: "category" | "case_type") {
+  const tickets = item.ticket_count ?? 0;
+  const policies = item.policy_count ?? 0;
+  const parts = [`${tickets} ticket`];
+  if (kind === "category" && policies > 0) {
+    parts.push(`${policies} policy SLA`);
+  }
+  return parts.join(" · ");
+}
+
+function canDeleteItem(item: TicketConfigItem, kind: "category" | "case_type") {
+  const tickets = item.ticket_count ?? 0;
+  const policies = kind === "category" ? item.policy_count ?? 0 : 0;
+  return tickets === 0 && policies === 0;
+}
+
 function ConfigListEditor({
   title,
   description,
+  kind,
   items,
+  deleteEndpoint,
   onSave,
   onCreate,
+  onDelete,
 }: {
   title: string;
   description: string;
+  kind: "category" | "case_type";
   items: TicketConfigItem[];
+  deleteEndpoint: string;
   onSave: (item: TicketConfigItem) => Promise<void>;
   onCreate: (label: string, code: string, sortOrder: number) => Promise<void>;
+  onDelete: () => Promise<void>;
 }) {
   const [drafts, setDrafts] = useState<Record<string, TicketConfigItem>>({});
   const [newLabel, setNewLabel] = useState("");
@@ -63,30 +85,47 @@ function ConfigListEditor({
     <div className="rounded border bg-white p-4">
       <h2 className="mb-1 text-lg font-bold text-black">{title}</h2>
       <p className="mb-4 text-sm text-gray-600">{description}</p>
+      <p className="mb-3 text-xs text-gray-500">
+        Puoi eliminare solo voci non usate da ticket
+        {kind === "category" ? " o policy SLA" : ""}. Altrimenti disattivale.
+      </p>
+
+      <div className="mb-2 hidden gap-2 px-3 text-xs font-semibold text-gray-500 md:grid md:grid-cols-12">
+        <span className="md:col-span-3">Nome</span>
+        <span className="md:col-span-2">Codice</span>
+        <span className="md:col-span-1">Ordine</span>
+        <span className="md:col-span-2">Utilizzo</span>
+        <span className="md:col-span-2">Stato</span>
+        <span className="md:col-span-2">Azioni</span>
+      </div>
 
       <div className="space-y-3">
         {items.map((item) => {
           const draft = drafts[item.id] ?? item;
+          const deletable = canDeleteItem(item, kind);
           return (
             <div key={item.id} className="grid gap-2 rounded border p-3 md:grid-cols-12">
               <input
-                className="rounded border p-2 text-black md:col-span-4"
+                className="rounded border p-2 text-black md:col-span-3"
                 value={draft.label}
                 onChange={(e) => updateDraft(item.id, { label: e.target.value })}
               />
               <input
-                className="rounded border p-2 font-mono text-sm text-black md:col-span-3"
+                className="rounded border p-2 font-mono text-sm text-black md:col-span-2"
                 value={draft.code}
                 onChange={(e) => updateDraft(item.id, { code: e.target.value })}
               />
               <input
-                className="rounded border p-2 text-black md:col-span-2"
+                className="rounded border p-2 text-black md:col-span-1"
                 type="number"
                 value={draft.sort_order}
                 onChange={(e) =>
                   updateDraft(item.id, { sort_order: Number(e.target.value) || 0 })
                 }
               />
+              <div className="flex items-center text-xs text-gray-600 md:col-span-2">
+                {formatUsage(item, kind)}
+              </div>
               <label className="flex items-center gap-2 text-sm text-black md:col-span-2">
                 <input
                   type="checkbox"
@@ -95,20 +134,61 @@ function ConfigListEditor({
                 />
                 Attiva
               </label>
-              <button
-                disabled={busyId === item.id}
-                onClick={async () => {
-                  setBusyId(item.id);
-                  try {
-                    await onSave(draft);
-                  } finally {
-                    setBusyId(null);
+              <div className="flex gap-2 md:col-span-2">
+                <button
+                  disabled={busyId === item.id}
+                  onClick={async () => {
+                    setBusyId(item.id);
+                    try {
+                      await onSave(draft);
+                    } finally {
+                      setBusyId(null);
+                    }
+                  }}
+                  className="rounded bg-black px-3 py-2 text-sm text-white"
+                >
+                  Salva
+                </button>
+                <button
+                  disabled={!deletable || busyId === `del-${item.id}`}
+                  title={
+                    deletable
+                      ? "Elimina definitivamente"
+                      : "Non eliminabile: voce in uso"
                   }
-                }}
-                className="rounded bg-black px-3 py-2 text-sm text-white md:col-span-1"
-              >
-                Salva
-              </button>
+                  onClick={async () => {
+                    if (
+                      !confirm(
+                        `Eliminare "${item.label}"? L'operazione non si può annullare.`
+                      )
+                    ) {
+                      return;
+                    }
+                    setBusyId(`del-${item.id}`);
+                    try {
+                      const response = await authFetch(
+                        `${deleteEndpoint}?id=${encodeURIComponent(item.id)}`,
+                        { method: "DELETE" }
+                      );
+                      const payload = await response.json().catch(() => ({}));
+                      if (!response.ok) {
+                        alert(payload.error ?? "Eliminazione non riuscita");
+                        return;
+                      }
+                      await onDelete();
+                    } finally {
+                      setBusyId(null);
+                    }
+                  }}
+                  className={`rounded border px-3 py-2 text-sm ${
+                    deletable
+                      ? "border-red-600 text-red-700"
+                      : "cursor-not-allowed border-gray-200 text-gray-400"
+                  }`}
+                >
+                  Elimina
+                </button>
+              </div>
             </div>
           );
         })}
@@ -285,20 +365,26 @@ export default function SettingsPage() {
         {tab === "categories" && (
           <ConfigListEditor
             title="Categorie ticket"
+            kind="category"
+            deleteEndpoint="/api/settings/categories"
             description="Usate in apertura ticket, filtri e policy SLA. Il codice resta stabile nei dati storici."
             items={categories}
             onSave={saveCategory}
             onCreate={createCategory}
+            onDelete={reload}
           />
         )}
 
         {tab === "case_types" && (
           <ConfigListEditor
             title="Casistiche"
+            kind="case_type"
+            deleteEndpoint="/api/settings/case-types"
             description="Tipologie di richiesta (es. pacco non ricevuto). La classificazione automatica email usa ancora regole dedicate nel codice."
             items={caseTypes}
             onSave={saveCaseType}
             onCreate={createCaseType}
+            onDelete={reload}
           />
         )}
 
