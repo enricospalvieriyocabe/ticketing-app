@@ -4,13 +4,20 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "../../../lib/supabase";
-import { CASE_TYPE_OPTIONS, getCaseTypeLabel } from "@/lib/ticket-classification";
+import {
+  activeConfigItems,
+  getCaseTypeLabelFromConfig,
+} from "@/lib/ticket-config";
+import { useTicketConfig } from "@/lib/use-ticket-config";
 import { extractOrderReference } from "@/lib/order-reference";
 import { parseTicketContent } from "@/lib/ticket-content";
 
 export default function TicketPage() {
   const { id } = useParams();
   const router = useRouter();
+  const { categories, caseTypes } = useTicketConfig();
+  const activeCategories = activeConfigItems(categories);
+  const activeCaseTypes = activeConfigItems(caseTypes);
 
   const [ticket, setTicket] = useState<any>(null);
   const [user, setUser] = useState<any>(null);
@@ -851,14 +858,14 @@ export default function TicketPage() {
                   }
                 >
                   <option value="">Non classificato</option>
-                  {CASE_TYPE_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
+                  {activeCaseTypes.map((option) => (
+                    <option key={option.code} value={option.code}>
                       {option.label}
                     </option>
                   ))}
                 </select>
                 <span className="mt-2 inline-block rounded bg-violet-100 px-2 py-1 text-xs font-semibold text-violet-700">
-                  {getCaseTypeLabel(ticket.case_type)}
+                  {getCaseTypeLabelFromConfig(caseTypes, ticket.case_type)}
                 </span>
               </label>
 
@@ -892,11 +899,11 @@ export default function TicketPage() {
                   value={ticket.category || "general"}
                   onChange={(e) => updateTicketField("category", e.target.value)}
                 >
-                  <option value="general">Generale</option>
-                  <option value="it">IT</option>
-                  <option value="hr">HR</option>
-                  <option value="admin">Amministrazione</option>
-                  <option value="bug">Bug</option>
+                  {activeCategories.map((item) => (
+                    <option key={item.code} value={item.code}>
+                      {item.label}
+                    </option>
+                  ))}
                 </select>
               </label>
   

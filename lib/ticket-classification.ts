@@ -20,7 +20,7 @@ type ClassificationRule = {
 
 export function getCaseTypeLabel(caseType?: string | null): string {
   const match = CASE_TYPE_OPTIONS.find((option) => option.value === caseType);
-  return match?.label ?? "Non classificato";
+  return match?.label ?? caseType ?? "Non classificato";
 }
 
 function matchesAll(text: string, patterns: RegExp[]): boolean {

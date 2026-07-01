@@ -1,13 +1,20 @@
 "use client";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+import Link from "next/link";
 import { useEffect, useState, useRef } from "react";
 import Image from "next/image";
 import { supabase } from "../lib/supabase";
 import { authCallbackUrl, resetPasswordUrl } from "@/lib/app-url";
 import { parseResendCooldownMs, translateAuthError } from "@/lib/auth-errors";
 import { fetchCurrentUserProfile, rememberSignupDraft, syncProfileFromMetadata } from "@/lib/profile-sync";
-import { CASE_TYPE_OPTIONS, getCaseTypeLabel } from "@/lib/ticket-classification";
+import {
+  activeConfigItems,
+  getCaseTypeLabelFromConfig,
+  getCategoryLabel,
+  type TicketConfigItem,
+} from "@/lib/ticket-config";
+import { useTicketConfig } from "@/lib/use-ticket-config";
 import { parseTicketContent } from "@/lib/ticket-content";
 
 const PENDING_EMAIL_KEY = "ticketing_pending_confirmation_email";
@@ -55,6 +62,9 @@ function collapseEmailThreadDuplicates(items: any[]): any[] {
 }
 
 export default function Home() {
+  const { categories, caseTypes } = useTicketConfig();
+  const activeCategories = activeConfigItems(categories);
+  const activeCaseTypes = activeConfigItems(caseTypes);
   const [user, setUser] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [role, setRole] = useState("");
@@ -173,6 +183,13 @@ export default function Home() {
     const timer = window.setInterval(() => setResendTick((value) => value + 1), 1000);
     return () => window.clearInterval(timer);
   }, [resendCooldownUntil]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const open = params.get("open");
+    if (open === "sla") setShowSlaManager(true);
+    if (open === "templates") setShowTemplateManager(true);
+  }, []);
 
   useEffect(() => {
     loadAssignableUsers();
@@ -352,7 +369,7 @@ export default function Home() {
     }
 
     alert(
-      "Registrazione avviata. Nome e azienda sono già salvati nel profilo. Controlla la casella email (anche spam) per confermare l'account. La prima email è già stata inviata: usa «Reinvia email di conferma» solo dopo 60 secondi se non arriva nulla."
+      "Registrazione avviata. Controlla la casella email (anche spam) per confermare l'account. La prima email è già stata inviata: usa «Reinvia email di conferma» solo dopo 60 secondi se non arriva nulla."
     );
   }
 
@@ -1543,6 +1560,14 @@ export default function Home() {
               {showCreateForm ? "Chiudi form" : "+ Nuovo ticket"}
             </button>
             {role === "team_leader" && (
+              <Link
+                href="/settings"
+                className="ml-3 inline-block rounded border border-[#1a2e2b] bg-[#1a2e2b] px-4 py-2 text-white"
+              >
+                Impostazioni
+              </Link>
+            )}
+            {role === "team_leader" && (
               <button
                 onClick={() => setShowOperatorPerformance(!showOperatorPerformance)}
                 className="ml-3 rounded border border-black bg-white px-4 py-2 text-black"
@@ -1591,11 +1616,11 @@ export default function Home() {
                 value={category}
                 onChange={(e) => setCategory(e.target.value)}
               >
-                <option value="general">Generale</option>
-                <option value="it">IT</option>
-                <option value="hr">HR</option>
-                <option value="admin">Amministrazione</option>
-                <option value="bug">Bug</option>
+                {activeCategories.map((item) => (
+                  <option key={item.code} value={item.code}>
+                    {item.label}
+                  </option>
+                ))}
               </select>
 
               <select
@@ -1778,11 +1803,11 @@ export default function Home() {
                           onChange={(e) => setSlaEditorCategory(e.target.value)}
                         >
                           <option value="">Qualsiasi</option>
-                          <option value="general">Generale</option>
-                          <option value="it">IT</option>
-                          <option value="hr">HR</option>
-                          <option value="admin">Amministrazione</option>
-                          <option value="bug">Bug</option>
+                          {activeCategories.map((item) => (
+                            <option key={item.code} value={item.code}>
+                              {item.label}
+                            </option>
+                          ))}
                         </select>
                       </div>
                       <div>
@@ -2124,11 +2149,11 @@ export default function Home() {
               onChange={(e) => setFilterCategory(e.target.value)}
             >
               <option value="all">Tutte le categorie</option>
-              <option value="general">Generale</option>
-              <option value="it">IT</option>
-              <option value="hr">HR</option>
-              <option value="admin">Amministrazione</option>
-              <option value="bug">Bug</option>
+              {activeCategories.map((item) => (
+                <option key={item.code} value={item.code}>
+                  {item.label}
+                </option>
+              ))}
             </select>
 
             <select
@@ -2149,8 +2174,8 @@ export default function Home() {
             >
               <option value="all">Tutte le casistiche</option>
               <option value="unclassified">Non classificati</option>
-              {CASE_TYPE_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
+              {activeCaseTypes.map((option) => (
+                <option key={option.code} value={option.code}>
                   {option.label}
                 </option>
               ))}
@@ -2185,6 +2210,8 @@ export default function Home() {
                     openedByName={getOpenedByName(ticket)}
                     closedByName={closedInfoByTicketId[ticket.id]?.closedByName}
                     closedAt={closedInfoByTicketId[ticket.id]?.closedAt}
+                    categories={categories}
+                    caseTypes={caseTypes}
                   />
                 ))}
               </div>
@@ -2218,6 +2245,8 @@ export default function Home() {
                     openedByName={getOpenedByName(ticket)}
                     closedByName={closedInfoByTicketId[ticket.id]?.closedByName}
                     closedAt={closedInfoByTicketId[ticket.id]?.closedAt}
+                    categories={categories}
+                    caseTypes={caseTypes}
                   />
                 ))}
               </div>
@@ -2251,6 +2280,8 @@ export default function Home() {
                     openedByName={getOpenedByName(ticket)}
                     closedByName={closedInfoByTicketId[ticket.id]?.closedByName}
                     closedAt={closedInfoByTicketId[ticket.id]?.closedAt}
+                    categories={categories}
+                    caseTypes={caseTypes}
                   />
                 ))}
               </div>
@@ -2284,6 +2315,8 @@ export default function Home() {
                     openedByName={getOpenedByName(ticket)}
                     closedByName={closedInfoByTicketId[ticket.id]?.closedByName}
                     closedAt={closedInfoByTicketId[ticket.id]?.closedAt}
+                    categories={categories}
+                    caseTypes={caseTypes}
                   />
                 ))}
               </div>
@@ -2317,6 +2350,8 @@ export default function Home() {
                     openedByName={getOpenedByName(ticket)}
                     closedByName={closedInfoByTicketId[ticket.id]?.closedByName}
                     closedAt={closedInfoByTicketId[ticket.id]?.closedAt}
+                    categories={categories}
+                    caseTypes={caseTypes}
                   />
                 ))}
               </div>
@@ -2487,7 +2522,18 @@ function TicketCard({
   openedByName,
   closedByName,
   closedAt,
-}: any) {
+  caseTypes,
+  categories,
+}: {
+  ticket: any;
+  showAssignee?: boolean;
+  assigneeEmail?: string;
+  openedByName?: string;
+  closedByName?: string;
+  closedAt?: string;
+  caseTypes: TicketConfigItem[];
+  categories: TicketConfigItem[];
+}) {
   const parsed = parseTicketContent(ticket);
   return (
     <div
@@ -2532,7 +2578,7 @@ function TicketCard({
         <div className="flex items-center gap-2">
           {ticket.case_type && (
             <span className="rounded bg-violet-100 px-2 py-1 text-xs font-semibold text-violet-700">
-              {getCaseTypeLabel(ticket.case_type)}
+              {getCaseTypeLabelFromConfig(caseTypes, ticket.case_type)}
             </span>
           )}
           {parsed.channel === "email" && (
@@ -2555,7 +2601,9 @@ function TicketCard({
           </span>
         </div>
 
-        <span className="text-xs text-gray-400">{ticket.category}</span>
+        <span className="text-xs text-gray-400">
+          {getCategoryLabel(categories, ticket.category)}
+        </span>
       </div>
     </div>
   );
