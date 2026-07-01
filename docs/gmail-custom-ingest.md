@@ -35,7 +35,7 @@ Aggiungi queste variabili al progetto (locale e produzione):
 
 - `SUPABASE_SERVICE_ROLE_KEY`: service role key del progetto Supabase
 - `EMAIL_INGEST_TOKEN`: token segreto usato da Gmail/App Script
-- `EMAIL_INGEST_SYSTEM_USER_ID`: UUID utente tecnico da usare in `created_by/requester_id`
+- `EMAIL_INGEST_SYSTEM_USER_ID`: UUID utente tecnico da usare in `created_by/requester_id` (es. profilo `ticket@yocabe.com` con ruolo `system`). **Va impostato manualmente su Vercel**: non viene letto da Supabase in automatico.
 - `EMAIL_INGEST_DEFAULT_CATEGORY` (opzionale, default `general`)
 - `EMAIL_INGEST_DEFAULT_PRIORITY` (opzionale, default `medium`)
 - `EMAIL_INGEST_IGNORE_FROM` (opzionale): lista email separate da virgola da ignorare in ingest (es. mailbox interne)

@@ -140,6 +140,7 @@ export default function Home() {
   const [templateEditorTitle, setTemplateEditorTitle] = useState("");
   const [templateEditorBody, setTemplateEditorBody] = useState("");
   const [templateEditorEnabled, setTemplateEditorEnabled] = useState(false);
+  const [templateEditorPurpose, setTemplateEditorPurpose] = useState("compose");
   const [autoReplyTemplateLoading, setAutoReplyTemplateLoading] = useState(false);
   const [autoReplyTemplateSaving, setAutoReplyTemplateSaving] = useState(false);
   const [showTemplateManager, setShowTemplateManager] = useState(false);
@@ -720,9 +721,31 @@ export default function Home() {
           data.created_at,
           slaSnapshot?.auto_reply_template_id ?? null
         );
+        if (role === "user") {
+          await queueTicketUserEmailNotify(data.id, "open");
+        }
       }
       resetCreateTicketForm();
       loadTickets(user);
+    }
+  }
+
+  async function queueTicketUserEmailNotify(ticketId: string, type: "open" | "close") {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+    if (!token) return;
+
+    try {
+      await fetch(`/api/ticket/${ticketId}/user-email`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ type }),
+      });
+    } catch (error) {
+      console.error(error);
     }
   }
 
@@ -753,6 +776,7 @@ export default function Home() {
     if (error) alert(error.message);
     else if (user) {
       await addTicketEvent(id, "closed", "Ticket chiuso");
+      await queueTicketUserEmailNotify(id, "close");
       loadTickets(user);
     }
   }
@@ -991,7 +1015,7 @@ export default function Home() {
     setAutoReplyTemplateLoading(true);
     const { data, error } = await supabase
       .from("ticket_auto_reply_templates")
-      .select("id, title, template_body, is_enabled, updated_at")
+      .select("id, title, template_body, is_enabled, updated_at, purpose")
       .order("id", { ascending: true });
 
     if (!error) {
@@ -1004,6 +1028,7 @@ export default function Home() {
         setTemplateEditorTitle(firstTemplate.title ?? "");
         setTemplateEditorBody(firstTemplate.template_body ?? "");
         setTemplateEditorEnabled(Boolean(firstTemplate.is_enabled));
+        setTemplateEditorPurpose(firstTemplate.purpose ?? "compose");
       } else {
         setSelectedTemplateId(1);
         setTemplateEditorTitle("");
@@ -1162,6 +1187,7 @@ export default function Home() {
     setTemplateEditorTitle(template.title ?? "");
     setTemplateEditorBody(template.template_body ?? "");
     setTemplateEditorEnabled(Boolean(template.is_enabled));
+    setTemplateEditorPurpose(template.purpose ?? "compose");
   }
 
   function createNewTemplateDraft() {
@@ -1173,6 +1199,7 @@ export default function Home() {
     setTemplateEditorTitle("");
     setTemplateEditorBody("");
     setTemplateEditorEnabled(false);
+    setTemplateEditorPurpose("compose");
   }
 
   async function saveAutoReplyTemplate() {
@@ -1197,6 +1224,7 @@ export default function Home() {
           title: templateEditorTitle.trim() || `Template #${templateId}`,
           template_body: templateEditorBody.trim(),
           is_enabled: templateEditorEnabled,
+          purpose: templateEditorPurpose,
           updated_by: user?.id ?? null,
           updated_at: new Date().toISOString(),
         },
@@ -2293,7 +2321,7 @@ export default function Home() {
           {role === "team_leader" && showTemplateManager && (
             <div className="mb-6 rounded border bg-gray-50 p-4">
               <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-lg font-bold text-black">Gestione template fuori orario</h2>
+                <h2 className="text-lg font-bold text-black">Gestione template</h2>
                 <button
                   onClick={createNewTemplateDraft}
                   className="rounded border border-black bg-white px-3 py-1 text-sm text-black"
@@ -2302,7 +2330,8 @@ export default function Home() {
                 </button>
               </div>
               <p className="mb-3 text-xs text-gray-600">
-                Qui puoi creare e aggiornare piu template. In automatico viene usato l&apos;ultimo template attivo aggiornato.
+                Template per risposte operatore, email apertura/chiusura ticket e notifiche fuori orario.
+                Variabili: {"{{ticket_number}}"}, {"{{title}}"}, {"{{reply_body}}"}, {"{{ticket_url}}"}.
               </p>
 
               {autoReplyTemplateLoading ? (
@@ -2327,6 +2356,7 @@ export default function Home() {
                         >
                           {(template.title || `Template #${template.id}`)}{" "}
                           {template.is_enabled ? "(attivo)" : "(disattivo)"}
+                          {template.purpose ? ` · ${template.purpose}` : ""}
                         </button>
                       ))}
                     </div>
@@ -2340,6 +2370,20 @@ export default function Home() {
                       value={templateEditorTitle}
                       onChange={(e) => setTemplateEditorTitle(e.target.value)}
                     />
+                    <label className="mb-2 block text-sm text-black">
+                      <span className="mb-1 block font-semibold">Scopo template</span>
+                      <select
+                        className="w-full rounded border p-2 text-black"
+                        value={templateEditorPurpose}
+                        onChange={(e) => setTemplateEditorPurpose(e.target.value)}
+                      >
+                        <option value="compose">Risposta operatore (composer ticket)</option>
+                        <option value="off_hours">Fuori orario (notifica in-app)</option>
+                        <option value="ticket_open">Email conferma apertura ticket</option>
+                        <option value="ticket_close">Email chiusura ticket</option>
+                        <option value="user_reply">Email notifica risposta staff</option>
+                      </select>
+                    </label>
                     <label className="mb-2 flex items-center gap-2 text-sm text-black">
                       <input
                         type="checkbox"

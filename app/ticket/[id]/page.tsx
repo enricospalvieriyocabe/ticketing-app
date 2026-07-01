@@ -54,8 +54,13 @@ export default function TicketPage() {
     loadSlaPolicies();
     loadComments();
     loadEvents();
-    loadReplyTemplates();
   }, []);
+
+  useEffect(() => {
+    if (role === "operator" || role === "team_leader") {
+      loadReplyTemplates();
+    }
+  }, [role]);
 
   useEffect(() => {
     if (role === "operator" || role === "team_leader") {
@@ -105,12 +110,23 @@ export default function TicketPage() {
   }
 
   async function loadReplyTemplates() {
-    const { data } = await supabase
-      .from("ticket_auto_reply_templates")
-      .select("id, title, template_body, is_enabled")
-      .eq("is_enabled", true)
-      .order("id", { ascending: true });
-    setReplyTemplates(data ?? []);
+    if (role !== "operator" && role !== "team_leader") return;
+
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+    if (!token) return;
+
+    try {
+      const response = await fetch("/api/ticket/reply-templates", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const result = await response.json();
+      if (response.ok && Array.isArray(result.templates)) {
+        setReplyTemplates(result.templates);
+      }
+    } catch (error) {
+      console.error(error);
+    }
   }
 
   async function loadNotes() {
@@ -293,7 +309,9 @@ export default function TicketPage() {
       if (result.mode === "email") {
         alert("Risposta in invio. Sara inviata dallo script Gmail.");
       } else if (result.ackQueued) {
-        alert("Risposta registrata. Avviso email inviato al richiedente.");
+        alert("Risposta registrata. Email di notifica inviata al richiedente.");
+      } else if (result.mode === "app_user" && result.ackReason) {
+        alert(`Risposta registrata sul ticket. Email non inviata (${result.ackReason}).`);
       } else {
         alert("Risposta registrata sul ticket.");
       }
@@ -716,14 +734,34 @@ export default function TicketPage() {
     loadTicket();
   }
 
+  async function queueTicketUserEmailNotify(type: "open" | "close") {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+    if (!token) return;
+
+    try {
+      await fetch(`/api/ticket/${id}/user-email`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ type }),
+      });
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
   async function closeTicket() {
     await supabase
       .from("tickets")
       .update({ status: "closed" })
       .eq("id", id);
-  
+
     await addEvent("closed", "Ticket chiuso");
-  
+    await queueTicketUserEmailNotify("close");
+
     loadTicket();
   }
 

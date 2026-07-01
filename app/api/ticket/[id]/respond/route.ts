@@ -1,6 +1,6 @@
 import { requireStaff } from "@/lib/api-auth";
 import { autoAssignTicketOnStaffAction } from "@/lib/ticket-staff-actions";
-import { formatTicketNumber } from "@/lib/ticket-number";
+import { queueTicketUserEmail } from "@/lib/ticket-email-notifications";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
 type RespondPayload = {
@@ -132,49 +132,32 @@ async function respondToAppUser(
 
   const systemUserId = process.env.EMAIL_INGEST_SYSTEM_USER_ID;
   let ackQueued = false;
+  let ackReason: string | null = null;
 
   if (ticket.requester_id && ticket.requester_id !== systemUserId) {
     const { data: requester } = await admin
       .from("profiles")
-      .select("email, role")
+      .select("id, email, role")
       .eq("id", ticket.requester_id)
       .maybeSingle();
 
-    const requesterEmail = extractEmailAddress(requester?.email);
-    const isAppUser = requester?.role === "user";
-
-    if (requesterEmail && isAppUser) {
-      const ticketLabel = formatTicketNumber(ticket.ticket_number) || ticketId.slice(0, 8);
-      const subject = `Aggiornamento ticket ${ticketLabel}`;
-      const ackBody = [
-        "Ciao,",
-        "",
-        `abbiamo registrato una risposta sul tuo ticket ${ticketLabel}.`,
-        "Accedi all'app ticketing per leggere gli aggiornamenti.",
-        "",
-        "Yocabè Customer Operations",
-      ].join("\n");
-
-      const { error: ackError } = await admin.from("ticket_email_replies").insert({
-        ticket_id: ticketId,
-        requested_by: actorUserId,
-        to_email: requesterEmail,
-        subject,
-        body: ackBody,
-        thread_id: null,
-        status: "pending",
+    if (requester) {
+      const result = await queueTicketUserEmail(admin, {
+        ticketId,
+        requester,
+        requestedBy: actorUserId,
+        purpose: "user_reply",
+        context: {
+          ticketId,
+          ticketNumber: ticket.ticket_number,
+          title: ticket.title,
+          replyBody,
+        },
+        eventType: "user_ack_email_queued",
+        eventDescription: `Avviso risposta inviato a ${requester.email}`,
       });
-
-      ackQueued = !ackError;
-
-      if (ackQueued) {
-        await admin.from("ticket_events").insert({
-          ticket_id: ticketId,
-          user_id: actorUserId,
-          type: "user_ack_email_queued",
-          description: `Avviso email inviato a ${requesterEmail}`,
-        });
-      }
+      ackQueued = result.queued;
+      ackReason = result.reason ?? null;
     }
   }
 
@@ -182,6 +165,7 @@ async function respondToAppUser(
     ok: true as const,
     mode: "app_user" as const,
     ackQueued,
+    ackReason,
   };
 }
 
