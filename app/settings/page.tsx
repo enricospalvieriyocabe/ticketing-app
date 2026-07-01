@@ -189,6 +189,62 @@ function ConfigListEditor({
                   Elimina
                 </button>
               </div>
+              {kind === "case_type" && (
+                <div className="flex flex-wrap gap-4 border-t pt-2 text-xs text-black md:col-span-12">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(draft.show_in_open_form)}
+                      onChange={(e) =>
+                        updateDraft(item.id, { show_in_open_form: e.target.checked })
+                      }
+                    />
+                    In apertura manuale
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(draft.requires_order_reference)}
+                      onChange={(e) =>
+                        updateDraft(item.id, {
+                          requires_order_reference: e.target.checked,
+                        })
+                      }
+                    />
+                    Ordine obbligatorio
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(draft.requires_shipping_info)}
+                      onChange={(e) =>
+                        updateDraft(item.id, { requires_shipping_info: e.target.checked })
+                      }
+                    />
+                    Info spedizione
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(draft.requires_delivery_info)}
+                      onChange={(e) =>
+                        updateDraft(item.id, { requires_delivery_info: e.target.checked })
+                      }
+                    />
+                    Info consegna
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(draft.requires_documents_note)}
+                      onChange={(e) =>
+                        updateDraft(item.id, { requires_documents_note: e.target.checked })
+                      }
+                    />
+                    Nota documenti
+                  </label>
+                </div>
+              )}
             </div>
           );
         })}
@@ -380,7 +436,7 @@ export default function SettingsPage() {
             title="Casistiche"
             kind="case_type"
             deleteEndpoint="/api/settings/case-types"
-            description="Tipologie di richiesta (es. pacco non ricevuto). La classificazione automatica email usa ancora regole dedicate nel codice."
+            description="Tipologie di richiesta. Le casistiche con «In apertura manuale» compaiono nel form Crea ticket per tutti gli utenti; le altre restano per classificazione email."
             items={caseTypes}
             onSave={saveCaseType}
             onCreate={createCaseType}

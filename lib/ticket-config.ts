@@ -6,6 +6,11 @@ export type TicketConfigItem = {
   is_active: boolean;
   ticket_count?: number;
   policy_count?: number;
+  show_in_open_form?: boolean;
+  requires_order_reference?: boolean;
+  requires_shipping_info?: boolean;
+  requires_delivery_info?: boolean;
+  requires_documents_note?: boolean;
 };
 
 export const DEFAULT_TICKET_CATEGORIES: TicketConfigItem[] = [
@@ -17,6 +22,34 @@ export const DEFAULT_TICKET_CATEGORIES: TicketConfigItem[] = [
 ];
 
 export const DEFAULT_CASE_TYPES: TicketConfigItem[] = [
+  {
+    id: "default-open-order",
+    code: "ticket_su_ordine",
+    label: "Ticket su ordine",
+    sort_order: 5,
+    is_active: true,
+    show_in_open_form: true,
+    requires_order_reference: true,
+  },
+  {
+    id: "default-open-general",
+    code: "ticket_generale",
+    label: "Ticket generale",
+    sort_order: 6,
+    is_active: true,
+    show_in_open_form: true,
+  },
+  {
+    id: "default-open-replenishment",
+    code: "ticket_rifornimento_magazzino",
+    label: "Ticket rifornimento magazzino",
+    sort_order: 7,
+    is_active: true,
+    show_in_open_form: true,
+    requires_shipping_info: true,
+    requires_delivery_info: true,
+    requires_documents_note: true,
+  },
   {
     id: "default-pnr",
     code: "pacco_non_ricevuto",

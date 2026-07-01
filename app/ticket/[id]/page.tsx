@@ -536,6 +536,17 @@ export default function TicketPage() {
     await updateTicketField("order_reference", nextValue);
   }
 
+  async function saveTextField(
+    field: "shipping_info" | "delivery_info" | "documents_note",
+    rawValue: string
+  ) {
+    if (!ticket) return;
+    const nextValue = rawValue.trim() || null;
+    const currentValue = ticket[field] ?? null;
+    if (nextValue === currentValue) return;
+    await updateTicketField(field, nextValue);
+  }
+
   async function startTicket() {
     if (!user) return;
   
@@ -889,6 +900,42 @@ export default function TicketPage() {
                     }
                   }}
                   placeholder="Es. 11003151416998"
+                />
+              </label>
+
+              <label className="mt-3 block">
+                Info spedizione:
+                <textarea
+                  key={`${ticket.id}-ship-${ticket.shipping_info ?? ""}`}
+                  className="mt-1 w-full rounded border p-2 text-black"
+                  defaultValue={ticket.shipping_info ?? ""}
+                  onBlur={(e) => saveTextField("shipping_info", e.target.value)}
+                  placeholder="Corriere, tracking, data spedizione..."
+                  rows={3}
+                />
+              </label>
+
+              <label className="mt-3 block">
+                Info consegna:
+                <textarea
+                  key={`${ticket.id}-del-${ticket.delivery_info ?? ""}`}
+                  className="mt-1 w-full rounded border p-2 text-black"
+                  defaultValue={ticket.delivery_info ?? ""}
+                  onBlur={(e) => saveTextField("delivery_info", e.target.value)}
+                  placeholder="Indirizzo, finestra consegna, referente..."
+                  rows={3}
+                />
+              </label>
+
+              <label className="mt-3 block">
+                Documenti / note allegati:
+                <textarea
+                  key={`${ticket.id}-doc-${ticket.documents_note ?? ""}`}
+                  className="mt-1 w-full rounded border p-2 text-black"
+                  defaultValue={ticket.documents_note ?? ""}
+                  onBlur={(e) => saveTextField("documents_note", e.target.value)}
+                  placeholder="DDT, packing list, altri riferimenti..."
+                  rows={3}
                 />
               </label>
   

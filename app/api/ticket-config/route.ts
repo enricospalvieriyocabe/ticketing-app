@@ -25,6 +25,11 @@ function mapRows(rows: TicketConfigItem[] | null): TicketConfigItem[] {
     label: String(row.label),
     sort_order: Number(row.sort_order ?? 0),
     is_active: Boolean(row.is_active),
+    show_in_open_form: Boolean(row.show_in_open_form),
+    requires_order_reference: Boolean(row.requires_order_reference),
+    requires_shipping_info: Boolean(row.requires_shipping_info),
+    requires_delivery_info: Boolean(row.requires_delivery_info),
+    requires_documents_note: Boolean(row.requires_documents_note),
   }));
 }
 
@@ -40,13 +45,17 @@ export async function GET(request: Request) {
 
     let categoriesQuery = admin
       .from("ticket_categories")
-      .select("id, code, label, sort_order, is_active")
+      .select(
+        "id, code, label, sort_order, is_active"
+      )
       .order("sort_order")
       .order("label");
 
     let caseTypesQuery = admin
       .from("ticket_case_types")
-      .select("id, code, label, sort_order, is_active")
+      .select(
+        "id, code, label, sort_order, is_active, show_in_open_form, requires_order_reference, requires_shipping_info, requires_delivery_info, requires_documents_note"
+      )
       .order("sort_order")
       .order("label");
 

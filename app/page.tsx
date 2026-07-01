@@ -14,6 +14,11 @@ import {
   getCategoryLabel,
   type TicketConfigItem,
 } from "@/lib/ticket-config";
+import {
+  getCaseTypeOpenRules,
+  openingCaseTypes,
+  validateOpenTicketForm,
+} from "@/lib/ticket-open-form";
 import { useTicketConfig } from "@/lib/use-ticket-config";
 import { parseTicketContent } from "@/lib/ticket-content";
 
@@ -65,6 +70,7 @@ export default function Home() {
   const { categories, caseTypes } = useTicketConfig();
   const activeCategories = activeConfigItems(categories);
   const activeCaseTypes = activeConfigItems(caseTypes);
+  const manualOpeningCaseTypes = openingCaseTypes(caseTypes);
   const [user, setUser] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [role, setRole] = useState("");
@@ -83,6 +89,11 @@ export default function Home() {
   const [description, setDescription] = useState("");
   const [category, setCategory] = useState("general");
   const [priority, setPriority] = useState("medium");
+  const [openCaseType, setOpenCaseType] = useState("");
+  const [orderReference, setOrderReference] = useState("");
+  const [shippingInfo, setShippingInfo] = useState("");
+  const [deliveryInfo, setDeliveryInfo] = useState("");
+  const [documentsNote, setDocumentsNote] = useState("");
   const [tickets, setTickets] = useState<any[]>([]);
   const [assignableUsers, setAssignableUsers] = useState<any[]>([]);
   const [selectedTicket, setSelectedTicket] = useState<any>(null);
@@ -144,6 +155,32 @@ export default function Home() {
   });
   const notificationRef = useRef<HTMLDivElement>(null);
   const profileAlertShownFor = useRef<string | null>(null);
+
+  const selectedOpenCaseType =
+    manualOpeningCaseTypes.find((item) => item.code === openCaseType) ?? null;
+  const selectedOpenRules = selectedOpenCaseType
+    ? getCaseTypeOpenRules(selectedOpenCaseType)
+    : null;
+
+  useEffect(() => {
+    if (manualOpeningCaseTypes.length === 0) return;
+    const stillValid = manualOpeningCaseTypes.some((item) => item.code === openCaseType);
+    if (!stillValid) {
+      const preferred =
+        manualOpeningCaseTypes.find((item) => item.code === "ticket_generale") ??
+        manualOpeningCaseTypes[0];
+      setOpenCaseType(preferred.code);
+    }
+  }, [manualOpeningCaseTypes, openCaseType]);
+
+  function resetCreateTicketForm() {
+    setTitle("");
+    setDescription("");
+    setOrderReference("");
+    setShippingInfo("");
+    setDeliveryInfo("");
+    setDocumentsNote("");
+  }
 
   function rememberPendingEmail(value: string) {
     const normalized = value.trim().toLowerCase();
@@ -604,12 +641,38 @@ export default function Home() {
   async function createTicket() {
     if (!user) return;
 
+    if (!title.trim()) {
+      alert("Inserisci il titolo del ticket");
+      return;
+    }
+    if (!description.trim()) {
+      alert("Inserisci la descrizione del ticket");
+      return;
+    }
+
+    const validationError = validateOpenTicketForm(caseTypes, {
+      caseType: openCaseType,
+      orderReference,
+      shippingInfo,
+      deliveryInfo,
+      documentsNote,
+    });
+    if (validationError) {
+      alert(validationError);
+      return;
+    }
+
     const nowIso = new Date().toISOString();
     const slaSnapshot = await getSlaSnapshotForNewTicket(
       nowIso,
       category,
       priority
     );
+
+    const trimmedOrderReference = orderReference.trim();
+    const trimmedShippingInfo = shippingInfo.trim();
+    const trimmedDeliveryInfo = deliveryInfo.trim();
+    const trimmedDocumentsNote = documentsNote.trim();
 
     const { data, error } = await supabase
       .from("tickets")
@@ -619,6 +682,11 @@ export default function Home() {
           description,
           category,
           priority,
+          case_type: openCaseType,
+          order_reference: trimmedOrderReference || null,
+          shipping_info: trimmedShippingInfo || null,
+          delivery_info: trimmedDeliveryInfo || null,
+          documents_note: trimmedDocumentsNote || null,
           created_by: user.id,
           requester_id: user.id,
           sla_policy_id: slaSnapshot?.sla_policy_id ?? null,
@@ -641,8 +709,7 @@ export default function Home() {
           slaSnapshot?.auto_reply_template_id ?? null
         );
       }
-      setTitle("");
-      setDescription("");
+      resetCreateTicketForm();
       loadTickets(user);
     }
   }
@@ -1597,6 +1664,81 @@ export default function Home() {
             <div className="mb-6 rounded border p-4">
               <h2 className="mb-4 text-xl font-bold text-black">Crea ticket</h2>
 
+              <label className="mb-1 block text-sm font-semibold text-black">
+                Casistica
+              </label>
+              <select
+                className="mb-3 w-full rounded border p-2 text-black"
+                value={openCaseType}
+                onChange={(e) => setOpenCaseType(e.target.value)}
+              >
+                {manualOpeningCaseTypes.length === 0 ? (
+                  <option value="">Nessuna casistica configurata</option>
+                ) : (
+                  manualOpeningCaseTypes.map((item) => (
+                    <option key={item.code} value={item.code}>
+                      {item.label}
+                    </option>
+                  ))
+                )}
+              </select>
+
+              {selectedOpenRules?.requiresOrderReference && (
+                <>
+                  <label className="mb-1 block text-sm font-semibold text-black">
+                    Riferimento ordine *
+                  </label>
+                  <input
+                    className="mb-3 w-full rounded border p-2 text-black"
+                    placeholder="Es. 11003151416998"
+                    value={orderReference}
+                    onChange={(e) => setOrderReference(e.target.value)}
+                  />
+                </>
+              )}
+
+              {selectedOpenRules?.requiresShippingInfo && (
+                <>
+                  <label className="mb-1 block text-sm font-semibold text-black">
+                    Informazioni spedizione *
+                  </label>
+                  <textarea
+                    className="mb-3 w-full rounded border p-2 text-black"
+                    placeholder="Corriere, tracking, data spedizione..."
+                    value={shippingInfo}
+                    onChange={(e) => setShippingInfo(e.target.value)}
+                  />
+                </>
+              )}
+
+              {selectedOpenRules?.requiresDeliveryInfo && (
+                <>
+                  <label className="mb-1 block text-sm font-semibold text-black">
+                    Informazioni consegna *
+                  </label>
+                  <textarea
+                    className="mb-3 w-full rounded border p-2 text-black"
+                    placeholder="Indirizzo, finestra consegna, referente..."
+                    value={deliveryInfo}
+                    onChange={(e) => setDeliveryInfo(e.target.value)}
+                  />
+                </>
+              )}
+
+              {selectedOpenRules?.requiresDocumentsNote && (
+                <>
+                  <label className="mb-1 block text-sm font-semibold text-black">
+                    Documenti / allegati *
+                  </label>
+                  <textarea
+                    className="mb-3 w-full rounded border p-2 text-black"
+                    placeholder="Descrivi i documenti utili (DDT, packing list...). Il caricamento file arriverà in un prossimo aggiornamento."
+                    value={documentsNote}
+                    onChange={(e) => setDocumentsNote(e.target.value)}
+                  />
+                </>
+              )}
+
               <input
                 className="mb-3 w-full rounded border p-2 text-black"
                 placeholder="Titolo ticket"
@@ -1636,7 +1778,8 @@ export default function Home() {
 
               <button
                 onClick={createTicket}
-                className="rounded bg-black px-4 py-2 text-white"
+                disabled={manualOpeningCaseTypes.length === 0}
+                className="rounded bg-black px-4 py-2 text-white disabled:cursor-not-allowed disabled:bg-gray-400"
               >
                 Crea ticket
               </button>

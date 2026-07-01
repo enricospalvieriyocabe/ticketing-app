@@ -11,7 +11,15 @@ type CaseTypeBody = {
   label?: string;
   sort_order?: number;
   is_active?: boolean;
+  show_in_open_form?: boolean;
+  requires_order_reference?: boolean;
+  requires_shipping_info?: boolean;
+  requires_delivery_info?: boolean;
+  requires_documents_note?: boolean;
 };
+
+const CASE_TYPE_SELECT =
+  "id, code, label, sort_order, is_active, show_in_open_form, requires_order_reference, requires_shipping_info, requires_delivery_info, requires_documents_note";
 
 export async function POST(request: Request) {
   try {
@@ -39,8 +47,13 @@ export async function POST(request: Request) {
         label,
         sort_order: Number(body.sort_order ?? 100),
         is_active: body.is_active ?? true,
+        show_in_open_form: body.show_in_open_form ?? false,
+        requires_order_reference: body.requires_order_reference ?? false,
+        requires_shipping_info: body.requires_shipping_info ?? false,
+        requires_delivery_info: body.requires_delivery_info ?? false,
+        requires_documents_note: body.requires_documents_note ?? false,
       })
-      .select("id, code, label, sort_order, is_active")
+      .select(CASE_TYPE_SELECT)
       .single();
 
     if (error) {
@@ -89,13 +102,28 @@ export async function PATCH(request: Request) {
 
     if (body.sort_order !== undefined) payload.sort_order = Number(body.sort_order);
     if (body.is_active !== undefined) payload.is_active = Boolean(body.is_active);
+    if (body.show_in_open_form !== undefined) {
+      payload.show_in_open_form = Boolean(body.show_in_open_form);
+    }
+    if (body.requires_order_reference !== undefined) {
+      payload.requires_order_reference = Boolean(body.requires_order_reference);
+    }
+    if (body.requires_shipping_info !== undefined) {
+      payload.requires_shipping_info = Boolean(body.requires_shipping_info);
+    }
+    if (body.requires_delivery_info !== undefined) {
+      payload.requires_delivery_info = Boolean(body.requires_delivery_info);
+    }
+    if (body.requires_documents_note !== undefined) {
+      payload.requires_documents_note = Boolean(body.requires_documents_note);
+    }
 
     const admin = getSupabaseAdmin();
     const { data, error } = await admin
       .from("ticket_case_types")
       .update(payload)
       .eq("id", id)
-      .select("id, code, label, sort_order, is_active")
+      .select(CASE_TYPE_SELECT)
       .single();
 
     if (error) {
