@@ -91,3 +91,45 @@ export async function requireTeamLeader(request: Request) {
     token: auth.token,
   };
 }
+
+export async function requireStaff(request: Request) {
+  const auth = await getAuthUserFromRequest(request);
+  if (auth.error || !auth.user) {
+    return { ...auth, profile: null };
+  }
+
+  const admin = getSupabaseAdmin();
+  const { data: profile, error: profileError } = await admin
+    .from("profiles")
+    .select("id, role, email, first_name, last_name")
+    .eq("id", auth.user.id)
+    .maybeSingle();
+
+  if (profileError) {
+    return {
+      error: profileError.message,
+      status: 500 as const,
+      user: auth.user,
+      profile: null,
+      token: auth.token,
+    };
+  }
+
+  if (!profile || !["operator", "team_leader"].includes(profile.role)) {
+    return {
+      error: "Solo operatori e team leader possono eseguire questa azione",
+      status: 403 as const,
+      user: auth.user,
+      profile,
+      token: auth.token,
+    };
+  }
+
+  return {
+    error: null,
+    status: 200 as const,
+    user: auth.user,
+    profile,
+    token: auth.token,
+  };
+}

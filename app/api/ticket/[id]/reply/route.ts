@@ -1,4 +1,5 @@
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
+import { autoAssignTicketOnStaffAction } from "@/lib/ticket-staff-actions";
 
 type ReplyPayload = {
   body?: string;
@@ -39,7 +40,7 @@ export async function POST(
 
   const { data: ticket, error: ticketError } = await supabaseAdmin
     .from("tickets")
-    .select("id, title, assigned_to, status")
+    .select("id, title, assigned_to, status, category, priority, sla_policy_id, created_at")
     .eq("id", ticketId)
     .single();
 
@@ -72,24 +73,12 @@ export async function POST(
 
   const actorUserId = String(payload.actorUserId ?? "").trim() || systemUserId;
 
-  if (!ticket.assigned_to) {
-    const autoAssignStatus = ticket.status === "open" ? "assigned" : ticket.status;
-    await supabaseAdmin
-      .from("tickets")
-      .update({
-        assigned_to: actorUserId,
-        status: autoAssignStatus,
-      })
-      .eq("id", ticketId)
-      .is("assigned_to", null);
-
-    await supabaseAdmin.from("ticket_events").insert({
-      ticket_id: ticketId,
-      user_id: actorUserId,
-      type: "auto_assigned",
-      description: "Assegnazione automatica al primo invio risposta email",
-    });
-  }
+  await autoAssignTicketOnStaffAction(
+    supabaseAdmin,
+    ticket,
+    actorUserId,
+    "prima risposta email"
+  );
 
   const { data: queuedReply, error: queueError } = await supabaseAdmin
     .from("ticket_email_replies")

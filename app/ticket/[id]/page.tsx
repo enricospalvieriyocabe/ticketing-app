@@ -11,6 +11,9 @@ import {
 import { useTicketConfig } from "@/lib/use-ticket-config";
 import { extractOrderReference } from "@/lib/order-reference";
 import { parseTicketContent } from "@/lib/ticket-content";
+import { buildIupiterOrderUrl } from "@/lib/iupiter-order-url";
+import { formatTicketNumber } from "@/lib/ticket-number";
+import { findSlaSnapshotForTicket } from "@/lib/sla-snapshot";
 
 export default function TicketPage() {
   const { id } = useParams();
@@ -28,9 +31,14 @@ export default function TicketPage() {
   const [creator, setCreator] = useState<any>(null);
 
   const [comments, setComments] = useState<any[]>([]);
-  const [composeMode, setComposeMode] = useState<"comment" | "reply">("comment");
   const [composeBody, setComposeBody] = useState("");
   const [replySending, setReplySending] = useState(false);
+  const [replyTemplates, setReplyTemplates] = useState<any[]>([]);
+  const [selectedReplyTemplateId, setSelectedReplyTemplateId] = useState("");
+  const [hasEmailTicket, setHasEmailTicket] = useState(false);
+  const [notes, setNotes] = useState<any[]>([]);
+  const [noteBody, setNoteBody] = useState("");
+  const [noteAuthorsById, setNoteAuthorsById] = useState<Record<string, string>>({});
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editingCommentBody, setEditingCommentBody] = useState("");
   const [commentAuthorsById, setCommentAuthorsById] = useState<Record<string, string>>({});
@@ -46,7 +54,14 @@ export default function TicketPage() {
     loadSlaPolicies();
     loadComments();
     loadEvents();
+    loadReplyTemplates();
   }, []);
+
+  useEffect(() => {
+    if (role === "operator" || role === "team_leader") {
+      loadNotes();
+    }
+  }, [role, id]);
 
   async function loadUser() {
     const { data } = await supabase.auth.getUser();
@@ -76,9 +91,88 @@ export default function TicketPage() {
     }
   
     setTicket(data);
-  
-    // carica profili collegati
+    setHasEmailTicket(data.source_channel === "email");
+
+    const { data: inbound } = await supabase
+      .from("email_ingest_log")
+      .select("id")
+      .eq("ticket_id", id)
+      .limit(1)
+      .maybeSingle();
+    if (inbound) setHasEmailTicket(true);
+
     loadProfiles(data);
+  }
+
+  async function loadReplyTemplates() {
+    const { data } = await supabase
+      .from("ticket_auto_reply_templates")
+      .select("id, title, template_body, is_enabled")
+      .eq("is_enabled", true)
+      .order("id", { ascending: true });
+    setReplyTemplates(data ?? []);
+  }
+
+  async function loadNotes() {
+    const { data, error } = await supabase
+      .from("ticket_notes")
+      .select("*")
+      .eq("ticket_id", id)
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      if (!error.message.includes("does not exist")) {
+        console.error(error.message);
+      }
+      setNotes([]);
+      return;
+    }
+
+    const loadedNotes = data ?? [];
+    setNotes(loadedNotes);
+
+    const authorIds = Array.from(
+      new Set(loadedNotes.map((note: any) => note.user_id).filter(Boolean))
+    );
+    if (authorIds.length === 0) {
+      setNoteAuthorsById({});
+      return;
+    }
+
+    const { data: authorProfiles } = await supabase
+      .from("profiles")
+      .select("*")
+      .in("id", authorIds);
+
+    const authorsMap: Record<string, string> = {};
+    for (const profile of authorProfiles ?? []) {
+      const fullName = String(profile.full_name ?? "").trim();
+      const composedName = `${profile.first_name ?? ""} ${profile.last_name ?? ""}`.trim();
+      const genericName = String(profile.name ?? "").trim();
+      authorsMap[profile.id] = fullName || composedName || genericName || profile.email || "Utente";
+    }
+    setNoteAuthorsById(authorsMap);
+  }
+
+  async function addNote() {
+    const body = noteBody.trim();
+    if (!user || !body) return;
+
+    const { error } = await supabase.from("ticket_notes").insert([
+      {
+        ticket_id: id,
+        user_id: user.id,
+        body,
+      },
+    ]);
+
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
+    setNoteBody("");
+    loadNotes();
   }
 
   async function loadComments() {
@@ -163,34 +257,60 @@ export default function TicketPage() {
     }
   }
 
-  async function sendReplyEmail(inputBody?: string) {
+  async function sendStaffReply(inputBody?: string) {
     const body = String(inputBody ?? composeBody).trim();
     if (!user || !body) return;
+
     setReplySending(true);
     try {
-      await ensureTicketAssignedToCurrentUser("invio risposta email");
-      const response = await fetch(`/api/ticket/${id}/reply`, {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) {
+        alert("Sessione non valida");
+        return;
+      }
+
+      const response = await fetch(`/api/ticket/${id}/respond`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          body,
-          actorUserId: user.id,
-        }),
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ body }),
       });
       const result = await response.json();
       if (!response.ok) {
-        alert(result?.error || "Errore invio email");
+        alert(result?.error || "Errore invio risposta");
         return;
       }
+
       setComposeBody("");
+      setSelectedReplyTemplateId("");
+      await loadTicket();
       await loadComments();
       await loadEvents();
-      alert("Risposta in invio. Sara inviata dallo script Gmail.");
+
+      if (result.mode === "email") {
+        alert("Risposta in invio. Sara inviata dallo script Gmail.");
+      } else if (result.ackQueued) {
+        alert("Risposta registrata. Avviso email inviato al richiedente.");
+      } else {
+        alert("Risposta registrata sul ticket.");
+      }
     } catch (error) {
-      alert(error instanceof Error ? error.message : "Errore invio email");
+      alert(error instanceof Error ? error.message : "Errore invio risposta");
     } finally {
       setReplySending(false);
     }
+  }
+
+  function applyReplyTemplate(templateId: string) {
+    setSelectedReplyTemplateId(templateId);
+    const template = replyTemplates.find((item) => String(item.id) === templateId);
+    if (!template) return;
+    const snippet = String(template.template_body ?? "").trim();
+    if (!snippet) return;
+    setComposeBody((current) => (current.trim() ? `${current.trim()}\n\n${snippet}` : snippet));
   }
 
   async function startEditComment(comment: any) {
@@ -319,13 +439,30 @@ export default function TicketPage() {
 
   async function ensureTicketAssignedToCurrentUser(reason: string) {
     if (!user || !ticket?.id || ticket.assigned_to) return;
-    const nextStatus = ticket.status === "open" ? "assigned" : ticket.status;
+
+    const updates: Record<string, unknown> = {
+      assigned_to: user.id,
+      status: "in_progress",
+    };
+
+    if (!ticket.sla_policy_id) {
+      const sla = await findSlaSnapshotForTicket(
+        supabase as any,
+        ticket.created_at ?? new Date().toISOString(),
+        String(ticket.category ?? "general"),
+        String(ticket.priority ?? "medium")
+      );
+      if (sla) {
+        updates.sla_policy_id = sla.sla_policy_id;
+        updates.sla_hours = sla.sla_hours;
+        updates.sla_due_at = sla.sla_due_at;
+        updates.sla_status = sla.sla_status;
+      }
+    }
+
     const { error } = await supabase
       .from("tickets")
-      .update({
-        assigned_to: user.id,
-        status: nextStatus,
-      })
+      .update(updates)
       .eq("id", ticket.id)
       .is("assigned_to", null);
 
@@ -618,21 +755,72 @@ export default function TicketPage() {
     parsedContent.orderReference ??
     extractOrderReference(ticket.title ?? "", ticket.description ?? "") ??
     "";
+  const iupiterOrderUrl = buildIupiterOrderUrl(orderReferenceDefault);
+  const isStaff = role === "operator" || role === "team_leader";
+  const ticketNumberLabel = formatTicketNumber(ticket.ticket_number);
 
   return (
     <main className="min-h-screen bg-gray-100 p-8">
-      <div className="mx-auto max-w-5xl rounded-xl bg-white p-6 shadow">
+      <div className="mx-auto max-w-6xl rounded-xl bg-white p-6 shadow">
         <button
           onClick={() => router.push("/")}
           className="mb-4 text-sm text-blue-600"
         >
           ← Torna alla dashboard
         </button>
-  
-        <h1 className="text-2xl font-bold text-black">{parsedContent.cleanTitle}</h1>
-  
-        <div className="mt-6 grid grid-cols-3 gap-6">
-          <div className="col-span-2">
+
+        <div className="mb-2 flex flex-wrap items-center gap-3">
+          {ticketNumberLabel ? (
+            <span className="rounded bg-slate-900 px-3 py-1 text-sm font-bold text-white">
+              {ticketNumberLabel}
+            </span>
+          ) : null}
+          <h1 className="text-2xl font-bold text-black">{parsedContent.cleanTitle}</h1>
+        </div>
+
+        <div className="mt-6 grid grid-cols-12 gap-6">
+          {isStaff && (
+            <div className="col-span-12 space-y-4 lg:col-span-3">
+              <div className="rounded border bg-amber-50 p-4">
+                <h2 className="mb-2 text-lg font-bold text-black">Note interne</h2>
+                <p className="mb-3 text-xs text-gray-600">
+                  Visibili solo a operatori e team leader. Non fanno parte della conversazione con il cliente.
+                </p>
+                <div className="max-h-72 space-y-2 overflow-auto">
+                  {notes.length === 0 && (
+                    <p className="text-sm text-gray-500">Nessuna nota</p>
+                  )}
+                  {notes.map((note) => (
+                    <div key={note.id} className="rounded border bg-white p-3 text-sm">
+                      <p className="text-xs font-semibold text-gray-600">
+                        {noteAuthorsById[note.user_id] || "Staff"}
+                      </p>
+                      <p className="mt-1 whitespace-pre-wrap text-black">{note.body}</p>
+                      <p className="mt-1 text-xs text-gray-500">
+                        {new Date(note.created_at).toLocaleString("it-IT")}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+                <textarea
+                  className="mt-3 w-full rounded border p-2 text-black"
+                  placeholder="Aggiungi una nota interna..."
+                  value={noteBody}
+                  onChange={(e) => setNoteBody(e.target.value)}
+                  rows={4}
+                />
+                <button
+                  onClick={addNote}
+                  disabled={!noteBody.trim()}
+                  className="mt-2 rounded bg-amber-700 px-3 py-2 text-sm text-white disabled:opacity-60"
+                >
+                  Aggiungi nota
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className={`col-span-12 ${isStaff ? "lg:col-span-6" : "lg:col-span-8"}`}>
             <div className="rounded border bg-white p-4">
               <h2 className="mb-2 text-lg font-bold text-black">Richiesta</h2>
               <pre className="max-h-[34rem] overflow-auto whitespace-pre-wrap break-words text-sm text-black [overflow-wrap:anywhere]">
@@ -648,7 +836,7 @@ export default function TicketPage() {
             </div>
   
             <div className="mt-6">
-              <h2 className="mb-2 text-lg font-bold text-black">Commenti</h2>
+              <h2 className="mb-2 text-lg font-bold text-black">Conversazione</h2>
   
               <div className="space-y-2">
               {comments.map((c) => {
@@ -656,7 +844,7 @@ export default function TicketPage() {
                 const isSystemTrackedReply = /^\[email-reply-id:[^\]]+\]/i.test(String(c.body ?? ""));
                 const replyStatusBadge = getReplyStatusBadgeFromComment(String(c.body ?? ""));
                 const isOutboundReplyComment = Boolean(replyStatusBadge);
-                const typeBadgeLabel = isOutboundReplyComment ? "Risposta email" : "Commento interno";
+                const typeBadgeLabel = isOutboundReplyComment ? "Risposta email" : "Risposta";
                 const isEditing = editingCommentId === c.id;
                 const wasEdited =
                   c.updated_at &&
@@ -759,40 +947,41 @@ export default function TicketPage() {
             </div>
   
             <div className="mt-6 rounded border bg-gray-50 p-4">
-              <h2 className="mb-2 text-lg font-bold text-black">Nuovo aggiornamento</h2>
-              <div className="mb-3 flex items-center gap-2">
-                <button
-                  onClick={() => setComposeMode("comment")}
-                  className={`rounded px-3 py-1 text-sm font-semibold ${
-                    composeMode === "comment"
-                      ? "bg-slate-800 text-white"
-                      : "bg-slate-100 text-slate-700"
-                  }`}
-                >
-                  Commento interno
-                </button>
-                <button
-                  onClick={() => setComposeMode("reply")}
-                  className={`rounded px-3 py-1 text-sm font-semibold ${
-                    composeMode === "reply"
-                      ? "bg-indigo-700 text-white"
-                      : "bg-indigo-100 text-indigo-700"
-                  }`}
-                >
-                  Risposta email
-                </button>
-              </div>
+              <h2 className="mb-2 text-lg font-bold text-black">
+                {isStaff ? "Rispondi" : "Aggiungi aggiornamento"}
+              </h2>
+
+              {isStaff && replyTemplates.length > 0 && (
+                <label className="mb-3 block text-sm text-black">
+                  <span className="mb-1 block font-semibold">Template risposta</span>
+                  <select
+                    className="w-full rounded border p-2 text-black"
+                    value={selectedReplyTemplateId}
+                    onChange={(e) => applyReplyTemplate(e.target.value)}
+                  >
+                    <option value="">Seleziona un template...</option>
+                    {replyTemplates.map((template) => (
+                      <option key={template.id} value={String(template.id)}>
+                        {template.title}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+
               <p className="mb-2 text-xs text-gray-600">
-                {composeMode === "reply"
-                  ? "Questa azione invia una email al mittente e registra l'invio nello storico attività."
-                  : "Questo testo resta interno al ticket e non viene inviato al cliente."}
+                {isStaff
+                  ? hasEmailTicket
+                    ? "La risposta verra inviata via email al mittente (es. Zalando) e registrata sul ticket."
+                    : "La risposta viene registrata sul ticket. Il richiedente riceve un avviso email di aggiornamento."
+                  : "Il tuo messaggio viene aggiunto alla conversazione del ticket."}
               </p>
               <textarea
                 className="w-full rounded border p-2 text-black"
                 placeholder={
-                  composeMode === "reply"
-                    ? "Scrivi la risposta da inviare al cliente..."
-                    : "Scrivi un commento interno..."
+                  isStaff
+                    ? "Scrivi la risposta..."
+                    : "Scrivi un aggiornamento..."
                 }
                 value={composeBody}
                 onChange={(e) => setComposeBody(e.target.value)}
@@ -800,8 +989,8 @@ export default function TicketPage() {
                 onKeyDown={(e) => {
                   if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
                     e.preventDefault();
-                    if (composeMode === "reply") {
-                      sendReplyEmail(composeBody);
+                    if (isStaff) {
+                      sendStaffReply(composeBody);
                     } else {
                       addComment(composeBody);
                     }
@@ -810,21 +999,21 @@ export default function TicketPage() {
               />
               <button
                 onClick={() =>
-                  composeMode === "reply" ? sendReplyEmail(composeBody) : addComment(composeBody)
+                  isStaff ? sendStaffReply(composeBody) : addComment(composeBody)
                 }
                 disabled={replySending || !composeBody.trim()}
                 className="mt-2 rounded bg-black px-4 py-2 text-white disabled:opacity-60"
               >
-                {composeMode === "reply"
+                {isStaff
                   ? replySending
                     ? "Invio in corso..."
-                    : "Invia risposta email"
-                  : "Aggiungi commento"}
+                    : "Invia risposta"
+                  : "Invia aggiornamento"}
               </button>
             </div>
           </div>
-  
-          <div className="col-span-1 space-y-4">
+
+          <div className={`col-span-12 space-y-4 ${isStaff ? "lg:col-span-3" : "lg:col-span-4"}`}>
             <div className="rounded border bg-gray-50 p-3">
               <h2 className="mb-2 font-bold text-black">Stato</h2>
   
@@ -901,6 +1090,16 @@ export default function TicketPage() {
                   }}
                   placeholder="Es. 11003151416998"
                 />
+                {iupiterOrderUrl ? (
+                  <a
+                    href={iupiterOrderUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-2 inline-block text-sm font-semibold text-blue-700 hover:underline"
+                  >
+                    Apri ordine in Iupiter
+                  </a>
+                ) : null}
               </label>
 
               <label className="mt-3 block">

@@ -22,6 +22,7 @@ import {
 import { ticketMatchesSearchQuery } from "@/lib/ticket-search";
 import { useTicketConfig } from "@/lib/use-ticket-config";
 import { parseTicketContent } from "@/lib/ticket-content";
+import { formatTicketNumber } from "@/lib/ticket-number";
 
 const PENDING_EMAIL_KEY = "ticketing_pending_confirmation_email";
 const RESEND_COOLDOWN_KEY = "ticketing_resend_cooldown_until";
@@ -2892,12 +2893,20 @@ function TicketCard({
   categories: TicketConfigItem[];
 }) {
   const parsed = parseTicketContent(ticket);
+  const ticketNumberLabel = formatTicketNumber(ticket.ticket_number);
   return (
     <div
       className="cursor-pointer rounded border bg-white p-3 shadow-sm hover:bg-gray-50"
       onClick={() => (window.location.href = `/ticket/${ticket.id}`)}
     >
-      <p className="font-bold text-black">{parsed.cleanTitle}</p>
+      <div className="flex flex-wrap items-center gap-2">
+        {ticketNumberLabel ? (
+          <span className="rounded bg-slate-900 px-2 py-0.5 text-xs font-bold text-white">
+            {ticketNumberLabel}
+          </span>
+        ) : null}
+        <p className="font-bold text-black">{parsed.cleanTitle}</p>
+      </div>
 
       <p className="truncate text-sm text-gray-600">
         {parsed.preview}
