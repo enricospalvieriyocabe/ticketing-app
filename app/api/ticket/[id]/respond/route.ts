@@ -1,6 +1,7 @@
 import { requireStaff } from "@/lib/api-auth";
 import { autoAssignTicketOnStaffAction } from "@/lib/ticket-staff-actions";
 import { queueTicketUserEmail } from "@/lib/ticket-email-notifications";
+import { notifyTicketOwnerOnNewReply } from "@/lib/ticket-owner-notification";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
 type RespondPayload = {
@@ -23,6 +24,8 @@ async function queueEmailReply(
   ticket: {
     id: string;
     title?: string | null;
+    requester_id?: string | null;
+    ticket_number?: number | null;
     assigned_to?: string | null;
     status?: string | null;
     category?: string | null;
@@ -87,6 +90,13 @@ async function queueEmailReply(
     user_id: actorUserId,
     type: "outbound_email_queued",
     description: `Risposta email in coda per ${recipientEmail}`,
+  });
+
+  await notifyTicketOwnerOnNewReply(admin, {
+    ticketId,
+    requesterId: ticket.requester_id,
+    actorUserId,
+    ticketNumber: ticket.ticket_number,
   });
 
   return {
@@ -160,6 +170,13 @@ async function respondToAppUser(
       ackReason = result.reason ?? null;
     }
   }
+
+  await notifyTicketOwnerOnNewReply(admin, {
+    ticketId,
+    requesterId: ticket.requester_id,
+    actorUserId,
+    ticketNumber: ticket.ticket_number,
+  });
 
   return {
     ok: true as const,

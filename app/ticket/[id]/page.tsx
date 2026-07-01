@@ -251,6 +251,12 @@ export default function TicketPage() {
       alert(error.message);
     } else {
       await ensureTicketAssignedToCurrentUser("primo commento");
+
+      if (ticket?.requester_id && ticket.requester_id !== user.id) {
+        const ticketLabel = formatTicketNumber(ticket.ticket_number) || "ticket";
+        await addNotification(ticket.requester_id, `Nuova risposta sul tuo ${ticketLabel}`);
+      }
+
       const mentionedEmails = extractMentionedEmails(body);
     
       for (const email of mentionedEmails) {
