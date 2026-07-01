@@ -124,6 +124,7 @@ export default function Home() {
   const [kpiLoading, setKpiLoading] = useState(false);
   const [currentProfile, setCurrentProfile] = useState<any>(null);
   const [profileNameById, setProfileNameById] = useState<Record<string, string>>({});
+  const [profileCompanyById, setProfileCompanyById] = useState<Record<string, string>>({});
   const [closedInfoByTicketId, setClosedInfoByTicketId] = useState<
     Record<string, { closedByName: string; closedAt: string }>
   >({});
@@ -574,6 +575,7 @@ export default function Home() {
   async function loadTicketListMetadata() {
     if (tickets.length === 0) {
       setProfileNameById({});
+      setProfileCompanyById({});
       setClosedInfoByTicketId({});
       return;
     }
@@ -607,10 +609,14 @@ export default function Home() {
       .in("id", allUserIds);
 
     const names: Record<string, string> = {};
+    const companies: Record<string, string> = {};
     for (const profile of profiles ?? []) {
       names[profile.id] = getProfileDisplayName(profile);
+      const company = String(profile.company_name ?? "").trim();
+      if (company) companies[profile.id] = company;
     }
     setProfileNameById(names);
+    setProfileCompanyById(companies);
 
     const closedMap: Record<string, { closedByName: string; closedAt: string }> = {};
     for (const event of closerEvents) {
@@ -1542,6 +1548,14 @@ export default function Home() {
     );
   }
 
+  function getRequesterCompany(ticket: any) {
+    return (
+      profileCompanyById[ticket.requester_id] ||
+      profileCompanyById[ticket.created_by] ||
+      null
+    );
+  }
+
   const assigneeNameById = new Map(
     assignableUsers.map((person) => [person.id, getProfileDisplayName(person)])
   );
@@ -2359,6 +2373,7 @@ export default function Home() {
                         : null
                     }
                     openedByName={getOpenedByName(ticket)}
+                    requesterCompany={getRequesterCompany(ticket)}
                     closedByName={closedInfoByTicketId[ticket.id]?.closedByName}
                     closedAt={closedInfoByTicketId[ticket.id]?.closedAt}
                     categories={categories}
@@ -2394,6 +2409,7 @@ export default function Home() {
                         : null
                     }
                     openedByName={getOpenedByName(ticket)}
+                    requesterCompany={getRequesterCompany(ticket)}
                     closedByName={closedInfoByTicketId[ticket.id]?.closedByName}
                     closedAt={closedInfoByTicketId[ticket.id]?.closedAt}
                     categories={categories}
@@ -2429,6 +2445,7 @@ export default function Home() {
                         : null
                     }
                     openedByName={getOpenedByName(ticket)}
+                    requesterCompany={getRequesterCompany(ticket)}
                     closedByName={closedInfoByTicketId[ticket.id]?.closedByName}
                     closedAt={closedInfoByTicketId[ticket.id]?.closedAt}
                     categories={categories}
@@ -2464,6 +2481,7 @@ export default function Home() {
                         : null
                     }
                     openedByName={getOpenedByName(ticket)}
+                    requesterCompany={getRequesterCompany(ticket)}
                     closedByName={closedInfoByTicketId[ticket.id]?.closedByName}
                     closedAt={closedInfoByTicketId[ticket.id]?.closedAt}
                     categories={categories}
@@ -2499,6 +2517,7 @@ export default function Home() {
                         : null
                     }
                     openedByName={getOpenedByName(ticket)}
+                    requesterCompany={getRequesterCompany(ticket)}
                     closedByName={closedInfoByTicketId[ticket.id]?.closedByName}
                     closedAt={closedInfoByTicketId[ticket.id]?.closedAt}
                     categories={categories}
@@ -2671,6 +2690,7 @@ function TicketCard({
   showAssignee,
   assigneeEmail,
   openedByName,
+  requesterCompany,
   closedByName,
   closedAt,
   caseTypes,
@@ -2680,6 +2700,7 @@ function TicketCard({
   showAssignee?: boolean;
   assigneeEmail?: string;
   openedByName?: string;
+  requesterCompany?: string | null;
   closedByName?: string;
   closedAt?: string;
   caseTypes: TicketConfigItem[];
@@ -2713,6 +2734,9 @@ function TicketCard({
       )}
 
       <p className="mt-1 text-xs text-gray-600">Aperto da: {openedByName || "N/D"}</p>
+      {requesterCompany ? (
+        <p className="mt-1 text-xs text-gray-600">Azienda: {requesterCompany}</p>
+      ) : null}
       <p className="mt-1 text-xs text-gray-600">
         Aperto il: {ticket.created_at ? new Date(ticket.created_at).toLocaleString("it-IT") : "N/D"}
       </p>
