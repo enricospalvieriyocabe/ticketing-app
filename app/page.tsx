@@ -15,10 +15,10 @@ import {
   type TicketConfigItem,
 } from "@/lib/ticket-config";
 import {
-  getCaseTypeOpenRules,
-  openingCaseTypes,
-  validateOpenTicketForm,
-} from "@/lib/ticket-open-form";
+  findCategoryByCode,
+  getCategoryFormTemplate,
+  validateCategoryTicketForm,
+} from "@/lib/ticket-form-templates";
 import { useTicketConfig } from "@/lib/use-ticket-config";
 import { parseTicketContent } from "@/lib/ticket-content";
 
@@ -70,7 +70,6 @@ export default function Home() {
   const { categories, caseTypes } = useTicketConfig();
   const activeCategories = activeConfigItems(categories);
   const activeCaseTypes = activeConfigItems(caseTypes);
-  const manualOpeningCaseTypes = openingCaseTypes(caseTypes);
   const [user, setUser] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [role, setRole] = useState("");
@@ -87,9 +86,8 @@ export default function Home() {
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [category, setCategory] = useState("general");
+  const [category, setCategory] = useState("");
   const [priority, setPriority] = useState("medium");
-  const [openCaseType, setOpenCaseType] = useState("");
   const [orderReference, setOrderReference] = useState("");
   const [shippingInfo, setShippingInfo] = useState("");
   const [deliveryInfo, setDeliveryInfo] = useState("");
@@ -156,26 +154,15 @@ export default function Home() {
   const notificationRef = useRef<HTMLDivElement>(null);
   const profileAlertShownFor = useRef<string | null>(null);
 
-  const selectedOpenCaseType =
-    manualOpeningCaseTypes.find((item) => item.code === openCaseType) ?? null;
-  const selectedOpenRules = selectedOpenCaseType
-    ? getCaseTypeOpenRules(selectedOpenCaseType)
-    : null;
-
-  useEffect(() => {
-    if (manualOpeningCaseTypes.length === 0) return;
-    const stillValid = manualOpeningCaseTypes.some((item) => item.code === openCaseType);
-    if (!stillValid) {
-      const preferred =
-        manualOpeningCaseTypes.find((item) => item.code === "ticket_generale") ??
-        manualOpeningCaseTypes[0];
-      setOpenCaseType(preferred.code);
-    }
-  }, [manualOpeningCaseTypes, openCaseType]);
+  const selectedCategory =
+    findCategoryByCode(categories, category) ??
+    findCategoryByCode(activeCategories, category);
+  const selectedFormTemplate = getCategoryFormTemplate(selectedCategory);
 
   function resetCreateTicketForm() {
     setTitle("");
     setDescription("");
+    setCategory("");
     setOrderReference("");
     setShippingInfo("");
     setDeliveryInfo("");
@@ -641,17 +628,13 @@ export default function Home() {
   async function createTicket() {
     if (!user) return;
 
-    if (!title.trim()) {
-      alert("Inserisci il titolo del ticket");
-      return;
-    }
-    if (!description.trim()) {
-      alert("Inserisci la descrizione del ticket");
+    if (!category.trim()) {
+      alert("Seleziona una categoria per aprire il ticket");
       return;
     }
 
-    const validationError = validateOpenTicketForm(caseTypes, {
-      caseType: openCaseType,
+    const validationError = validateCategoryTicketForm(categories, {
+      category,
       orderReference,
       shippingInfo,
       deliveryInfo,
@@ -659,6 +642,15 @@ export default function Home() {
     });
     if (validationError) {
       alert(validationError);
+      return;
+    }
+
+    if (!title.trim()) {
+      alert("Inserisci il titolo del ticket");
+      return;
+    }
+    if (!description.trim()) {
+      alert("Inserisci la descrizione del ticket");
       return;
     }
 
@@ -682,7 +674,6 @@ export default function Home() {
           description,
           category,
           priority,
-          case_type: openCaseType,
           order_reference: trimmedOrderReference || null,
           shipping_info: trimmedShippingInfo || null,
           delivery_info: trimmedDeliveryInfo || null,
@@ -1665,99 +1656,20 @@ export default function Home() {
               <h2 className="mb-4 text-xl font-bold text-black">Crea ticket</h2>
 
               <label className="mb-1 block text-sm font-semibold text-black">
-                Casistica
+                Categoria *
               </label>
               <select
                 className="mb-3 w-full rounded border p-2 text-black"
-                value={openCaseType}
-                onChange={(e) => setOpenCaseType(e.target.value)}
-              >
-                {manualOpeningCaseTypes.length === 0 ? (
-                  <option value="">Nessuna casistica configurata</option>
-                ) : (
-                  manualOpeningCaseTypes.map((item) => (
-                    <option key={item.code} value={item.code}>
-                      {item.label}
-                    </option>
-                  ))
-                )}
-              </select>
-
-              {selectedOpenRules?.requiresOrderReference && (
-                <>
-                  <label className="mb-1 block text-sm font-semibold text-black">
-                    Riferimento ordine *
-                  </label>
-                  <input
-                    className="mb-3 w-full rounded border p-2 text-black"
-                    placeholder="Es. 11003151416998"
-                    value={orderReference}
-                    onChange={(e) => setOrderReference(e.target.value)}
-                  />
-                </>
-              )}
-
-              {selectedOpenRules?.requiresShippingInfo && (
-                <>
-                  <label className="mb-1 block text-sm font-semibold text-black">
-                    Informazioni spedizione *
-                  </label>
-                  <textarea
-                    className="mb-3 w-full rounded border p-2 text-black"
-                    placeholder="Corriere, tracking, data spedizione..."
-                    value={shippingInfo}
-                    onChange={(e) => setShippingInfo(e.target.value)}
-                  />
-                </>
-              )}
-
-              {selectedOpenRules?.requiresDeliveryInfo && (
-                <>
-                  <label className="mb-1 block text-sm font-semibold text-black">
-                    Informazioni consegna *
-                  </label>
-                  <textarea
-                    className="mb-3 w-full rounded border p-2 text-black"
-                    placeholder="Indirizzo, finestra consegna, referente..."
-                    value={deliveryInfo}
-                    onChange={(e) => setDeliveryInfo(e.target.value)}
-                  />
-                </>
-              )}
-
-              {selectedOpenRules?.requiresDocumentsNote && (
-                <>
-                  <label className="mb-1 block text-sm font-semibold text-black">
-                    Documenti / allegati *
-                  </label>
-                  <textarea
-                    className="mb-3 w-full rounded border p-2 text-black"
-                    placeholder="Descrivi i documenti utili (DDT, packing list...). Il caricamento file arriverà in un prossimo aggiornamento."
-                    value={documentsNote}
-                    onChange={(e) => setDocumentsNote(e.target.value)}
-                  />
-                </>
-              )}
-
-              <input
-                className="mb-3 w-full rounded border p-2 text-black"
-                placeholder="Titolo ticket"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-              />
-
-              <textarea
-                className="mb-3 w-full rounded border p-2 text-black"
-                placeholder="Descrizione"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-              />
-
-              <select
-                className="mb-3 w-full rounded border p-2 text-black"
                 value={category}
-                onChange={(e) => setCategory(e.target.value)}
+                onChange={(e) => {
+                  setCategory(e.target.value);
+                  setOrderReference("");
+                  setShippingInfo("");
+                  setDeliveryInfo("");
+                  setDocumentsNote("");
+                }}
               >
+                <option value="">Seleziona categoria...</option>
                 {activeCategories.map((item) => (
                   <option key={item.code} value={item.code}>
                     {item.label}
@@ -1765,24 +1677,112 @@ export default function Home() {
                 ))}
               </select>
 
-              <select
-                className="mb-3 w-full rounded border p-2 text-black"
-                value={priority}
-                onChange={(e) => setPriority(e.target.value)}
-              >
-                <option value="low">Bassa</option>
-                <option value="medium">Media</option>
-                <option value="high">Alta</option>
-                <option value="urgent">Urgente</option>
-              </select>
+              {!category && (
+                <p className="mb-3 text-sm text-gray-600">
+                  Scegli la categoria per vedere i campi richiesti.
+                </p>
+              )}
 
-              <button
-                onClick={createTicket}
-                disabled={manualOpeningCaseTypes.length === 0}
-                className="rounded bg-black px-4 py-2 text-white disabled:cursor-not-allowed disabled:bg-gray-400"
-              >
-                Crea ticket
-              </button>
+              {category && (
+                <>
+                  {selectedFormTemplate.requiresOrderReference && (
+                    <>
+                      <label className="mb-1 block text-sm font-semibold text-black">
+                        Riferimento ordine *
+                      </label>
+                      <input
+                        className="mb-3 w-full rounded border p-2 text-black"
+                        placeholder="Es. 11003151416998"
+                        value={orderReference}
+                        onChange={(e) => setOrderReference(e.target.value)}
+                        required
+                      />
+                    </>
+                  )}
+
+                  {selectedFormTemplate.requiresShippingInfo && (
+                    <>
+                      <label className="mb-1 block text-sm font-semibold text-black">
+                        Informazioni spedizione *
+                      </label>
+                      <textarea
+                        className="mb-3 w-full rounded border p-2 text-black"
+                        placeholder="Corriere, tracking, data spedizione..."
+                        value={shippingInfo}
+                        onChange={(e) => setShippingInfo(e.target.value)}
+                        required
+                      />
+                    </>
+                  )}
+
+                  {selectedFormTemplate.requiresDeliveryInfo && (
+                    <>
+                      <label className="mb-1 block text-sm font-semibold text-black">
+                        Informazioni consegna *
+                      </label>
+                      <textarea
+                        className="mb-3 w-full rounded border p-2 text-black"
+                        placeholder="Indirizzo, finestra consegna, referente..."
+                        value={deliveryInfo}
+                        onChange={(e) => setDeliveryInfo(e.target.value)}
+                        required
+                      />
+                    </>
+                  )}
+
+                  {selectedFormTemplate.requiresDocumentsNote && (
+                    <>
+                      <label className="mb-1 block text-sm font-semibold text-black">
+                        Documenti / allegati *
+                      </label>
+                      <textarea
+                        className="mb-3 w-full rounded border p-2 text-black"
+                        placeholder="Descrivi i documenti utili (DDT, packing list...). Il caricamento file arriverà in un prossimo aggiornamento."
+                        value={documentsNote}
+                        onChange={(e) => setDocumentsNote(e.target.value)}
+                        required
+                      />
+                    </>
+                  )}
+
+                  <input
+                    className="mb-3 w-full rounded border p-2 text-black"
+                    placeholder="Titolo ticket *"
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    required
+                  />
+
+                  <textarea
+                    className="mb-3 w-full rounded border p-2 text-black"
+                    placeholder="Descrizione *"
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    required
+                  />
+
+                  <label className="mb-1 block text-sm font-semibold text-black">
+                    Priorità
+                  </label>
+                  <select
+                    className="mb-3 w-full rounded border p-2 text-black"
+                    value={priority}
+                    onChange={(e) => setPriority(e.target.value)}
+                  >
+                    <option value="low">Bassa</option>
+                    <option value="medium">Media</option>
+                    <option value="high">Alta</option>
+                    <option value="urgent">Urgente</option>
+                  </select>
+
+                  <button
+                    onClick={createTicket}
+                    className="rounded bg-black px-4 py-2 text-white"
+                  >
+                    Crea ticket
+                  </button>
+                </>
+              )}
             </div>
           )}
 

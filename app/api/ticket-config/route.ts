@@ -11,6 +11,7 @@ import {
   DEFAULT_TICKET_CATEGORIES,
   type TicketConfigItem,
 } from "@/lib/ticket-config";
+import { DEFAULT_FORM_TEMPLATE } from "@/lib/ticket-form-templates";
 
 async function loadRole(userId: string) {
   const admin = getSupabaseAdmin();
@@ -18,18 +19,30 @@ async function loadRole(userId: string) {
   return data?.role ?? null;
 }
 
-function mapRows(rows: TicketConfigItem[] | null): TicketConfigItem[] {
+function mapCategoryRows(rows: TicketConfigItem[] | null): TicketConfigItem[] {
+  return (rows ?? []).map((row) => {
+    const code = String(row.code);
+    const defaultMatch = DEFAULT_TICKET_CATEGORIES.find((item) => item.code === code);
+    return {
+      id: String(row.id),
+      code,
+      label: String(row.label),
+      sort_order: Number(row.sort_order ?? 0),
+      is_active: Boolean(row.is_active),
+      form_template: row.form_template
+        ? String(row.form_template)
+        : (defaultMatch?.form_template ?? DEFAULT_FORM_TEMPLATE),
+    };
+  });
+}
+
+function mapCaseTypeRows(rows: TicketConfigItem[] | null): TicketConfigItem[] {
   return (rows ?? []).map((row) => ({
     id: String(row.id),
     code: String(row.code),
     label: String(row.label),
     sort_order: Number(row.sort_order ?? 0),
     is_active: Boolean(row.is_active),
-    show_in_open_form: Boolean(row.show_in_open_form),
-    requires_order_reference: Boolean(row.requires_order_reference),
-    requires_shipping_info: Boolean(row.requires_shipping_info),
-    requires_delivery_info: Boolean(row.requires_delivery_info),
-    requires_documents_note: Boolean(row.requires_documents_note),
   }));
 }
 
@@ -45,17 +58,13 @@ export async function GET(request: Request) {
 
     let categoriesQuery = admin
       .from("ticket_categories")
-      .select(
-        "id, code, label, sort_order, is_active"
-      )
+      .select("id, code, label, sort_order, is_active, form_template")
       .order("sort_order")
       .order("label");
 
     let caseTypesQuery = admin
       .from("ticket_case_types")
-      .select(
-        "id, code, label, sort_order, is_active, show_in_open_form, requires_order_reference, requires_shipping_info, requires_delivery_info, requires_documents_note"
-      )
+      .select("id, code, label, sort_order, is_active")
       .order("sort_order")
       .order("label");
 
@@ -82,8 +91,8 @@ export async function GET(request: Request) {
       );
     }
 
-    let mappedCategories = mapRows(categories as TicketConfigItem[]);
-    let mappedCaseTypes = mapRows(caseTypes as TicketConfigItem[]);
+    let mappedCategories = mapCategoryRows(categories as TicketConfigItem[]);
+    let mappedCaseTypes = mapCaseTypeRows(caseTypes as TicketConfigItem[]);
 
     if (role === "team_leader") {
       [mappedCategories, mappedCaseTypes] = await Promise.all([

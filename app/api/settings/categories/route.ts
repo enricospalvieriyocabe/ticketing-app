@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { requireTeamLeader } from "@/lib/api-auth";
 import { slugifyConfigCode } from "@/lib/ticket-config";
+import { DEFAULT_FORM_TEMPLATE } from "@/lib/ticket-form-templates";
 import { getCategoryUsage } from "@/lib/ticket-config-usage";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
@@ -11,7 +12,10 @@ type CategoryBody = {
   label?: string;
   sort_order?: number;
   is_active?: boolean;
+  form_template?: string;
 };
+
+const CATEGORY_SELECT = "id, code, label, sort_order, is_active, form_template";
 
 export async function POST(request: Request) {
   try {
@@ -39,8 +43,9 @@ export async function POST(request: Request) {
         label,
         sort_order: Number(body.sort_order ?? 100),
         is_active: body.is_active ?? true,
+        form_template: String(body.form_template ?? DEFAULT_FORM_TEMPLATE),
       })
-      .select("id, code, label, sort_order, is_active")
+      .select(CATEGORY_SELECT)
       .single();
 
     if (error) {
@@ -89,13 +94,16 @@ export async function PATCH(request: Request) {
 
     if (body.sort_order !== undefined) payload.sort_order = Number(body.sort_order);
     if (body.is_active !== undefined) payload.is_active = Boolean(body.is_active);
+    if (body.form_template !== undefined) {
+      payload.form_template = String(body.form_template).trim() || DEFAULT_FORM_TEMPLATE;
+    }
 
     const admin = getSupabaseAdmin();
     const { data, error } = await admin
       .from("ticket_categories")
       .update(payload)
       .eq("id", id)
-      .select("id, code, label, sort_order, is_active")
+      .select(CATEGORY_SELECT)
       .single();
 
     if (error) {

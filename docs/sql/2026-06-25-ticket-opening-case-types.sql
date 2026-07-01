@@ -1,3 +1,4 @@
+-- DEPRECATO: usare 2026-06-25-category-form-templates.sql
 -- Casistiche per apertura manuale ticket + campi opzionali su tickets
 -- Supabase → SQL Editor → incolla tutto → Run
 

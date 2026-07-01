@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import { fetchCurrentUserProfile } from "@/lib/profile-sync";
 import { supabase } from "@/lib/supabase";
 import { slugifyConfigCode, type TicketConfigItem } from "@/lib/ticket-config";
+import { DEFAULT_FORM_TEMPLATE, TICKET_FORM_TEMPLATES } from "@/lib/ticket-form-templates";
 import { useTicketConfig } from "@/lib/use-ticket-config";
 
 type SettingsTab = "categories" | "case_types" | "sla" | "templates";
@@ -189,59 +190,23 @@ function ConfigListEditor({
                   Elimina
                 </button>
               </div>
-              {kind === "case_type" && (
-                <div className="flex flex-wrap gap-4 border-t pt-2 text-xs text-black md:col-span-12">
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(draft.show_in_open_form)}
+              {kind === "category" && (
+                <div className="border-t pt-2 md:col-span-12">
+                  <label className="block text-xs font-semibold text-gray-600">
+                    Template form apertura
+                    <select
+                      className="mt-1 w-full rounded border p-2 text-sm text-black"
+                      value={draft.form_template ?? DEFAULT_FORM_TEMPLATE}
                       onChange={(e) =>
-                        updateDraft(item.id, { show_in_open_form: e.target.checked })
+                        updateDraft(item.id, { form_template: e.target.value })
                       }
-                    />
-                    In apertura manuale
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(draft.requires_order_reference)}
-                      onChange={(e) =>
-                        updateDraft(item.id, {
-                          requires_order_reference: e.target.checked,
-                        })
-                      }
-                    />
-                    Ordine obbligatorio
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(draft.requires_shipping_info)}
-                      onChange={(e) =>
-                        updateDraft(item.id, { requires_shipping_info: e.target.checked })
-                      }
-                    />
-                    Info spedizione
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(draft.requires_delivery_info)}
-                      onChange={(e) =>
-                        updateDraft(item.id, { requires_delivery_info: e.target.checked })
-                      }
-                    />
-                    Info consegna
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(draft.requires_documents_note)}
-                      onChange={(e) =>
-                        updateDraft(item.id, { requires_documents_note: e.target.checked })
-                      }
-                    />
-                    Nota documenti
+                    >
+                      {TICKET_FORM_TEMPLATES.map((template) => (
+                        <option key={template.code} value={template.code}>
+                          {template.label}
+                        </option>
+                      ))}
+                    </select>
                   </label>
                 </div>
               )}
@@ -423,7 +388,7 @@ export default function SettingsPage() {
             title="Categorie ticket"
             kind="category"
             deleteEndpoint="/api/settings/categories"
-            description="Usate in apertura ticket, filtri e policy SLA. Il codice resta stabile nei dati storici."
+            description="Usate in apertura ticket, filtri e policy SLA. Il template form definisce i campi extra mostrati in «Crea ticket» (es. ordine obbligatorio per Ordini)."
             items={categories}
             onSave={saveCategory}
             onCreate={createCategory}
@@ -436,7 +401,7 @@ export default function SettingsPage() {
             title="Casistiche"
             kind="case_type"
             deleteEndpoint="/api/settings/case-types"
-            description="Tipologie di richiesta. Le casistiche con «In apertura manuale» compaiono nel form Crea ticket per tutti gli utenti; le altre restano per classificazione email."
+            description="Classificazione del ticket (es. da email o assegnata dagli operatori). Distinta dal template form legato alla categoria in apertura."
             items={caseTypes}
             onSave={saveCaseType}
             onCreate={createCaseType}
